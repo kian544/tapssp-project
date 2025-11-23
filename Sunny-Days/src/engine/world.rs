@@ -19,20 +19,19 @@ pub struct World {
     pub player: Player,
     pub logs: VecDeque<String>,
     pub seed: u64,
+    pub inventory_open: bool,
 }
 
 impl World {
     pub fn new(seed: u64, width: usize, height: usize) -> Self {
-        // Room 1
         let (level0, spawn0) = Self::make_level(seed, 0, width, height);
-
-        // Room 2
         let (level1, _spawn1) = Self::make_level(seed, 1, width, height);
 
         let mut logs = VecDeque::new();
         logs.push_back(format!("Seed: {}", seed));
         logs.push_back("Welcome to Sunny Days.".to_string());
         logs.push_back("Move with WASD or arrow keys. Press Q to quit.".to_string());
+        logs.push_back("Press I to open inventory.".to_string());
         logs.push_back("Find the white door to enter Room 2.".to_string());
 
         Self {
@@ -41,6 +40,7 @@ impl World {
             player: Player::new(spawn0.0, spawn0.1),
             logs,
             seed,
+            inventory_open: false,
         }
     }
 
@@ -61,17 +61,12 @@ impl World {
         let seed = base_seed.wrapping_add(depth as u64 * 9_973);
         let mut map = generate_rooms_and_corridors(width, height, seed);
 
-        // Spawn = first floor tile
         let (sx, sy) = map.find_first_floor().unwrap_or((1, 1));
         let spawn = (sx as i32, sy as i32);
 
-        // Place exactly ONE door somewhere random, not on spawn
         let door = Self::place_random_door(&mut map, seed ^ 0xD00D, spawn);
 
-        (
-            Level { map, door },
-            spawn,
-        )
+        (Level { map, door }, spawn)
     }
 
     fn place_random_door(map: &mut Map, seed: u64, exclude: (i32, i32)) -> (i32, i32) {
@@ -114,7 +109,6 @@ impl World {
         let new_room = if old_room == 0 { 1 } else { 0 };
         self.current = new_room;
 
-        // Teleport player to the door location in the other room
         let target = self.levels[new_room].door;
         self.player.x = target.0;
         self.player.y = target.1;
@@ -126,11 +120,60 @@ impl World {
         }
     }
 
+    fn toggle_inventory(&mut self) {
+        self.inventory_open = !self.inventory_open;
+        if self.inventory_open {
+            self.push_log("Inventory opened.".to_string());
+        } else {
+            self.push_log("Inventory closed.".to_string());
+        }
+    }
+
+    fn use_selected_consumable(&mut self) {
+        if let Some(item) = self.player.inventory.take_selected() {
+            let before = self.player.hp;
+            self.player.hp = (self.player.hp + item.heal).min(self.player.max_hp);
+            let healed = self.player.hp - before;
+            self.push_log(format!("Used {} (+{} HP).", item.name, healed));
+        } else {
+            self.push_log("No consumables to use.".to_string());
+        }
+    }
+
     pub fn apply_action(&mut self, action: Action) -> bool {
         match action {
-            Action::Move(dx, dy) => {
-                let old = (self.player.x, self.player.y);
+            Action::ToggleInventory => {
+                self.toggle_inventory();
+                true
+            }
 
+            Action::InventoryUp => {
+                if self.inventory_open {
+                    self.player.inventory.move_selection(-1);
+                }
+                true
+            }
+
+            Action::InventoryDown => {
+                if self.inventory_open {
+                    self.player.inventory.move_selection(1);
+                }
+                true
+            }
+
+            Action::UseConsumable => {
+                if self.inventory_open {
+                    self.use_selected_consumable();
+                }
+                true
+            }
+
+            Action::Move(dx, dy) => {
+                if self.inventory_open {
+                    return true; // movement disabled while menu open
+                }
+
+                let old = (self.player.x, self.player.y);
                 let map_snapshot = self.current_map().clone();
                 self.player.try_move(dx, dy, &map_snapshot);
 
@@ -146,6 +189,7 @@ impl World {
 
                 true
             }
+
             Action::Quit => false,
             Action::None => true,
         }

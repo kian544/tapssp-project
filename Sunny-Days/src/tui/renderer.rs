@@ -9,9 +9,6 @@ use ratatui::{
     Frame,
 };
 
-// ---- ZOOM / VISIBILITY WINDOW ----
-// Player can only see a box of this size around them.
-// Even if the terminal is huge, outside this window is blank.
 const ZOOM_W: i32 = 35;
 const ZOOM_H: i32 = 20;
 
@@ -51,10 +48,8 @@ pub fn render(f: &mut Frame, world: &World) {
         return;
     }
 
-    // Dynamic log height
     let log_h = (size.height / 4).clamp(5, 10);
 
-    // Vertical split: top (map+sidebar), bottom (logs)
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -66,16 +61,14 @@ pub fn render(f: &mut Frame, world: &World) {
     let top = vertical[0];
     let bottom = vertical[1];
 
-    // Dynamic sidebar width
-    let sidebar_w = (top.width / 3).clamp(20, 32);
+    let sidebar_w = (top.width / 3).clamp(20, 40);
 
-    // If terminal is narrow, stack sidebar under map
     if top.width < sidebar_w + 25 {
         let stacked = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(3),
-                Constraint::Length(8),
+                Constraint::Length(12),
             ])
             .split(top);
 
@@ -107,17 +100,14 @@ fn draw_map(f: &mut Frame, area: Rect, world: &World) {
     let map_w = map.width as i32;
     let map_h = map.height as i32;
 
-    // Inner size of the map panel (minus borders)
     let inner_w = (area.width as i32).saturating_sub(2);
     let inner_h = (area.height as i32).saturating_sub(2);
 
-    // Camera uses full available panel space (dynamic)
     let view_w = inner_w.max(1);
     let view_h = inner_h.max(1);
 
     let (x0, y0) = compute_viewport_origin(px, py, map_w, map_h, view_w, view_h);
 
-    // Effective zoom clamped to current panel size
     let zoom_w = ZOOM_W.min(view_w);
     let zoom_h = ZOOM_H.min(view_h);
     let half_zoom_w = zoom_w / 2;
@@ -132,7 +122,6 @@ fn draw_map(f: &mut Frame, area: Rect, world: &World) {
         for vx in 0..view_w {
             let wx = x0 + vx;
 
-            // If outside zoom window around player, hide it (blank)
             if (wx - px).abs() > half_zoom_w || (wy - py).abs() > half_zoom_h {
                 spans.push(Span::raw(" "));
                 continue;
@@ -143,7 +132,6 @@ fn draw_map(f: &mut Frame, area: Rect, world: &World) {
                 continue;
             }
 
-            // Outside map bounds => blank padding
             if wx < 0 || wy < 0 || wx >= map_w || wy >= map_h {
                 spans.push(Span::raw(" "));
                 continue;
@@ -175,20 +163,48 @@ fn draw_sidebar(f: &mut Frame, area: Rect, world: &World) {
     let p = &world.player;
     let room_label = if world.current == 0 { "Room 1" } else { "Room 2" };
 
-    let text = vec![
+    let mut text: Vec<Line> = vec![
         Line::from(vec![
             Span::styled("HP: ", Style::default().fg(Color::White)),
-            Span::styled(format!("{}/{}", p.hp, p.hp), Style::default().fg(Color::Green)),
+            Span::styled(format!("{}/{}", p.hp, p.max_hp), Style::default().fg(Color::Green)),
         ]),
         Line::from(format!("Pos: ({}, {})", p.x, p.y)),
         Line::from(format!("Room: {}", room_label)),
         Line::from(format!("Seed: {}", world.seed)),
         Line::from(""),
-        Line::from(Span::styled("Controls", Style::default().fg(Color::Cyan))),
-        Line::from("WASD / Arrows: Move"),
-        Line::from("Q: Quit"),
-        Line::from("Step on + to switch rooms"),
     ];
+
+    if world.inventory_open {
+        text.push(Line::from(Span::styled("Inventory", Style::default().fg(Color::Cyan))));
+        let sword_name = p.inventory.sword.as_ref().map(|e| e.name.as_str()).unwrap_or("<empty>");
+        let shield_name = p.inventory.shield.as_ref().map(|e| e.name.as_str()).unwrap_or("<empty>");
+        text.push(Line::from(format!("Sword : {}", sword_name)));
+        text.push(Line::from(format!("Shield: {}", shield_name)));
+        text.push(Line::from(""));
+
+        text.push(Line::from("Consumables (Space to use)"));
+        if p.inventory.consumables.is_empty() {
+            text.push(Line::from("  <none>"));
+        } else {
+            for (i, c) in p.inventory.consumables.iter().enumerate() {
+                let marker = if i == p.inventory.selected { ">" } else { " " };
+                text.push(Line::from(format!("{} {}", marker, c.name)));
+            }
+        }
+
+        let empty_slots = 10usize.saturating_sub(p.inventory.consumables.len());
+        text.push(Line::from(format!("Empty slots: {}", empty_slots)));
+        text.push(Line::from(""));
+        text.push(Line::from("Up/Down: select"));
+        text.push(Line::from("Space: use"));
+        text.push(Line::from("I or Esc: close"));
+    } else {
+        text.push(Line::from(Span::styled("Controls", Style::default().fg(Color::Cyan))));
+        text.push(Line::from("WASD / Arrows: Move"));
+        text.push(Line::from("I: Inventory"));
+        text.push(Line::from("Q: Quit"));
+        text.push(Line::from("Step on + to switch rooms"));
+    }
 
     let sidebar = Paragraph::new(text)
         .block(Block::default().borders(Borders::ALL).title("Player"))
