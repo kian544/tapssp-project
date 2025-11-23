@@ -9,6 +9,12 @@ use ratatui::{
     Frame,
 };
 
+// ---- ZOOM / VISIBILITY WINDOW ----
+// Player can only see a box of this size around them.
+// Even if the terminal is huge, outside this window is blank.
+const ZOOM_W: i32 = 35;
+const ZOOM_H: i32 = 20;
+
 fn compute_viewport_origin(
     px: i32,
     py: i32,
@@ -45,8 +51,10 @@ pub fn render(f: &mut Frame, world: &World) {
         return;
     }
 
+    // Dynamic log height
     let log_h = (size.height / 4).clamp(5, 10);
 
+    // Vertical split: top (map+sidebar), bottom (logs)
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -58,8 +66,10 @@ pub fn render(f: &mut Frame, world: &World) {
     let top = vertical[0];
     let bottom = vertical[1];
 
+    // Dynamic sidebar width
     let sidebar_w = (top.width / 3).clamp(20, 32);
 
+    // If terminal is narrow, stack sidebar under map
     if top.width < sidebar_w + 25 {
         let stacked = Layout::default()
             .direction(Direction::Vertical)
@@ -97,13 +107,21 @@ fn draw_map(f: &mut Frame, area: Rect, world: &World) {
     let map_w = map.width as i32;
     let map_h = map.height as i32;
 
+    // Inner size of the map panel (minus borders)
     let inner_w = (area.width as i32).saturating_sub(2);
     let inner_h = (area.height as i32).saturating_sub(2);
 
+    // Camera uses full available panel space (dynamic)
     let view_w = inner_w.max(1);
     let view_h = inner_h.max(1);
 
     let (x0, y0) = compute_viewport_origin(px, py, map_w, map_h, view_w, view_h);
+
+    // Effective zoom clamped to current panel size
+    let zoom_w = ZOOM_W.min(view_w);
+    let zoom_h = ZOOM_H.min(view_h);
+    let half_zoom_w = zoom_w / 2;
+    let half_zoom_h = zoom_h / 2;
 
     let mut lines: Vec<Line> = Vec::with_capacity(view_h as usize);
 
@@ -114,11 +132,18 @@ fn draw_map(f: &mut Frame, area: Rect, world: &World) {
         for vx in 0..view_w {
             let wx = x0 + vx;
 
+            // If outside zoom window around player, hide it (blank)
+            if (wx - px).abs() > half_zoom_w || (wy - py).abs() > half_zoom_h {
+                spans.push(Span::raw(" "));
+                continue;
+            }
+
             if wx == px && wy == py {
                 spans.push(Span::styled("@", Style::default().fg(Color::Yellow)));
                 continue;
             }
 
+            // Outside map bounds => blank padding
             if wx < 0 || wy < 0 || wx >= map_w || wy >= map_h {
                 spans.push(Span::raw(" "));
                 continue;
@@ -128,7 +153,7 @@ fn draw_map(f: &mut Frame, area: Rect, world: &World) {
             let (ch, style) = match tile {
                 Tile::Wall => ("#", Style::default().fg(Color::DarkGray)),
                 Tile::Floor => (" ", Style::default()),
-                Tile::Door => ("+", Style::default().fg(Color::White)), // single door
+                Tile::Door => ("+", Style::default().fg(Color::White)),
             };
 
             spans.push(Span::styled(ch, style));
@@ -148,7 +173,6 @@ fn draw_sidebar(f: &mut Frame, area: Rect, world: &World) {
     f.render_widget(Clear, area);
 
     let p = &world.player;
-
     let room_label = if world.current == 0 { "Room 1" } else { "Room 2" };
 
     let text = vec![

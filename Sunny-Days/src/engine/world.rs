@@ -11,7 +11,6 @@ use std::collections::VecDeque;
 pub struct Level {
     pub map: Map,
     pub door: (i32, i32),
-    pub spawn: (i32, i32),
 }
 
 pub struct World {
@@ -20,8 +19,6 @@ pub struct World {
     pub player: Player,
     pub logs: VecDeque<String>,
     pub seed: u64,
-    pub width: usize,
-    pub height: usize,
 }
 
 impl World {
@@ -29,7 +26,7 @@ impl World {
         // Room 1
         let (level0, spawn0) = Self::make_level(seed, 0, width, height);
 
-        // Room 2 (different seed so it’s a different dungeon)
+        // Room 2
         let (level1, _spawn1) = Self::make_level(seed, 1, width, height);
 
         let mut logs = VecDeque::new();
@@ -44,8 +41,6 @@ impl World {
             player: Player::new(spawn0.0, spawn0.1),
             logs,
             seed,
-            width,
-            height,
         }
     }
 
@@ -53,15 +48,16 @@ impl World {
         &self.levels[self.current]
     }
 
-    fn current_level_mut(&mut self) -> &mut Level {
-        &mut self.levels[self.current]
-    }
-
     pub fn current_map(&self) -> &Map {
         &self.current_level().map
     }
 
-    fn make_level(base_seed: u64, depth: usize, width: usize, height: usize) -> (Level, (i32, i32)) {
+    fn make_level(
+        base_seed: u64,
+        depth: usize,
+        width: usize,
+        height: usize,
+    ) -> (Level, (i32, i32)) {
         let seed = base_seed.wrapping_add(depth as u64 * 9_973);
         let mut map = generate_rooms_and_corridors(width, height, seed);
 
@@ -70,21 +66,15 @@ impl World {
         let spawn = (sx as i32, sy as i32);
 
         // Place exactly ONE door somewhere random, not on spawn
-        // (valid hex constant now)
         let door = Self::place_random_door(&mut map, seed ^ 0xD00D, spawn);
 
         (
-            Level {
-                map,
-                door,
-                spawn,
-            },
+            Level { map, door },
             spawn,
         )
     }
 
     fn place_random_door(map: &mut Map, seed: u64, exclude: (i32, i32)) -> (i32, i32) {
-        // collect all floor tiles
         let mut floors: Vec<(i32, i32)> = Vec::new();
         for y in 0..map.height {
             for x in 0..map.width {
@@ -96,7 +86,6 @@ impl World {
 
         let mut rng = StdRng::seed_from_u64(seed);
 
-        // choose random floor not equal to spawn
         let mut door = exclude;
         if floors.len() > 1 {
             loop {
@@ -142,7 +131,6 @@ impl World {
             Action::Move(dx, dy) => {
                 let old = (self.player.x, self.player.y);
 
-                // Snapshot map for movement collision
                 let map_snapshot = self.current_map().clone();
                 self.player.try_move(dx, dy, &map_snapshot);
 
@@ -151,7 +139,6 @@ impl World {
                     self.push_log(format!("Player moved to ({}, {})", newp.0, newp.1));
                 }
 
-                // Check tile under player on the *current* room
                 let tile = self.current_map().get(newp.0 as usize, newp.1 as usize);
                 if tile == Tile::Door {
                     self.toggle_room();
