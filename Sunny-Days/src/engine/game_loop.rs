@@ -1,6 +1,7 @@
 use crate::engine::action::Action;
 use crate::engine::world::World;
 use crate::tui::{input::is_press, renderer::render};
+use crate::audio::Music;
 
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
@@ -18,19 +19,31 @@ use std::{
 const MOVE_COOLDOWN_MS: u64 = 90;
 
 pub fn run() -> std::io::Result<()> {
+    // ---- start background music (non-fatal if missing) ----
+    let _music = match Music::start_loop("assets/Background1.mp3") {
+        Ok(m) => Some(m),
+        Err(e) => {
+            eprintln!("Audio disabled: {e}");
+            None
+        }
+    };
+
+    // ---- terminal init ----
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    terminal.clear()?;
+    terminal.clear()?; // clean first frame
 
+    // ---- game init ----
     let seed = rand::random::<u64>();
     let mut world = World::new(seed, 80, 45);
 
     let tick_rate = Duration::from_millis(60);
     let mut last_move_time = Instant::now() - Duration::from_millis(MOVE_COOLDOWN_MS);
 
+    // ---- main loop ----
     let mut running = true;
     while running {
         if let Err(_) = terminal.draw(|f| render(f, &world)) {
@@ -93,6 +106,7 @@ pub fn run() -> std::io::Result<()> {
         }
     }
 
+    // ---- restore terminal ----
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),

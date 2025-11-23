@@ -7,3 +7,4 @@ edition = "2024"
 rand = "0.8"
 crossterm = "0.27"
 ratatui = "0.26"
+rodio = { version = "0.19", features = ["symphonia-mp3"] }
