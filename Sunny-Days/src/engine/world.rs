@@ -8,6 +8,9 @@ use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 
 use std::collections::VecDeque;
+use std::time::Duration;
+
+
 
 #[derive(Clone)]
 pub struct Chest {
@@ -153,6 +156,15 @@ impl World {
             format!("{} HP", delta)
         }
     }
+
+    fn fmt_simple_bonus(delta: i32) -> String {
+        if delta >= 0 {
+            format!("+{}", delta)
+        } else {
+            format!("{}", delta)
+        }
+    }
+
 
     // ✅ NEW: only returns a floor tile that is >= min_dist away from all taken positions.
     // Uses Chebyshev distance (max of dx/dy), which feels best on grid movement.
@@ -502,95 +514,121 @@ impl World {
         }
     }
 
-    fn use_or_unequip_or_equip(&mut self) {
-        let selection = self.player.inventory.selection();
-        let mut log_msg: Option<String> = None;
+fn use_or_unequip_or_equip(&mut self) {
+    let selection = self.player.inventory.selection();
+    let mut log_msg: Option<String> = None;
 
-        match selection {
-            InvSelection::SwordSlot => {
-                let eq_opt = self.player.inventory.sword.take();
-                if let Some(eq) = eq_opt {
-                    self.player.inventory.backpack.push(eq.clone());
-                    log_msg = Some(format!("Unequipped {}.", eq.name));
-                } else {
-                    log_msg = Some("No sword equipped.".to_string());
-                }
-            }
-
-            InvSelection::ShieldSlot => {
-                let eq_opt = self.player.inventory.shield.take();
-                if let Some(eq) = eq_opt {
-                    self.player.inventory.backpack.push(eq.clone());
-                    log_msg = Some(format!("Unequipped {}.", eq.name));
-                } else {
-                    log_msg = Some("No shield equipped.".to_string());
-                }
-            }
-
-            InvSelection::Consumable(_) => {
-                let item_opt = self.player.inventory.take_selected_consumable();
-                if let Some(item) = item_opt {
-                    let before = self.player.hp;
-                    self.player.hp = (self.player.hp + item.heal).min(self.player.max_hp);
-                    let healed = self.player.hp - before;
-                    log_msg = Some(format!(
-                        "Used {} ({}).",
-                        item.name,
-                        Self::fmt_hp_delta(healed)
-                    ));
-                } else {
-                    log_msg = Some("No consumables to use.".to_string());
-                }
-            }
-
-            InvSelection::BackpackItem(i) => {
-                let eq_opt = {
-                    let inv = &mut self.player.inventory;
-                    if i >= inv.backpack.len() {
-                        None
-                    } else {
-                        Some(inv.backpack.remove(i))
-                    }
-                };
-
-                if let Some(eq) = eq_opt {
-                    match eq.slot {
-                        Slot::Sword => {
-                            if let Some(old) = self.player.inventory.sword.take() {
-                                self.player.inventory.backpack.push(old);
-                            }
-                            self.player.inventory.sword = Some(eq.clone());
-                            log_msg = Some(format!("Equipped sword: {}.", eq.name));
-                        }
-                        Slot::Shield => {
-                            if let Some(old) = self.player.inventory.shield.take() {
-                                self.player.inventory.backpack.push(old);
-                            }
-                            self.player.inventory.shield = Some(eq.clone());
-                            log_msg = Some(format!("Equipped shield: {}.", eq.name));
-                        }
-                    }
-
-                    let inv = &mut self.player.inventory;
-                    if inv.backpack.is_empty() {
-                        inv.backpack_cursor = 0;
-                    } else if inv.backpack_cursor >= inv.backpack.len() {
-                        inv.backpack_cursor = inv.backpack.len() - 1;
-                    }
-                } else {
-                    log_msg = Some("Nothing to equip.".to_string());
-                }
-            }
-
-            InvSelection::None => {
-                log_msg = Some("Nothing to use.".to_string());
+    match selection {
+        InvSelection::SwordSlot => {
+            let eq_opt = self.player.inventory.sword.take();
+            if let Some(eq) = eq_opt {
+                self.player.inventory.backpack.push(eq.clone());
+                log_msg = Some(format!("Unequipped {}.", eq.name));
+            } else {
+                log_msg = Some("No sword equipped.".to_string());
             }
         }
 
-        if let Some(m) = log_msg {
-            self.push_log(m);
+        InvSelection::ShieldSlot => {
+            let eq_opt = self.player.inventory.shield.take();
+            if let Some(eq) = eq_opt {
+                self.player.inventory.backpack.push(eq.clone());
+                log_msg = Some(format!("Unequipped {}.", eq.name));
+            } else {
+                log_msg = Some("No shield equipped.".to_string());
+            }
+        }
+
+        InvSelection::Consumable(_) => {
+            let item_opt = self.player.inventory.take_selected_consumable();
+            if let Some(item) = item_opt {
+                use std::time::Duration;
+
+                // Heal immediately (can be negative for damage)
+                let before = self.player.hp;
+                self.player.hp = (self.player.hp + item.heal).min(self.player.max_hp);
+                let healed = self.player.hp - before;
+
+                // Temporary buffs (30 sec) for non-HP stats
+                if item.atk_bonus != 0 || item.def_bonus != 0 {
+                    self.player.add_temp_buff(
+                        item.atk_bonus,
+                        item.def_bonus,
+                        0,
+                        Duration::from_secs(30),
+                    );
+                }
+
+                // Build effects string for log
+                let fmt_signed = |v: i32| if v >= 0 { format!("+{}", v) } else { format!("{}", v) };
+
+                let mut effects: Vec<String> = vec![Self::fmt_hp_delta(healed)];
+                if item.atk_bonus != 0 {
+                    effects.push(format!("{} ATK/30sec", fmt_signed(item.atk_bonus)));
+                }
+                if item.def_bonus != 0 {
+                    effects.push(format!("{} DEF/30sec", fmt_signed(item.def_bonus)));
+                }
+
+                log_msg = Some(format!(
+                    "Used {} ({}).",
+                    item.name,
+                    effects.join(", ")
+                ));
+            } else {
+                log_msg = Some("No consumables to use.".to_string());
+            }
+        }
+
+        InvSelection::BackpackItem(i) => {
+            let eq_opt = {
+                let inv = &mut self.player.inventory;
+                if i >= inv.backpack.len() {
+                    None
+                } else {
+                    Some(inv.backpack.remove(i))
+                }
+            };
+
+            if let Some(eq) = eq_opt {
+                match eq.slot {
+                    Slot::Sword => {
+                        if let Some(old) = self.player.inventory.sword.take() {
+                            self.player.inventory.backpack.push(old);
+                        }
+                        self.player.inventory.sword = Some(eq.clone());
+                        log_msg = Some(format!("Equipped sword: {}.", eq.name));
+                    }
+                    Slot::Shield => {
+                        if let Some(old) = self.player.inventory.shield.take() {
+                            self.player.inventory.backpack.push(old);
+                        }
+                        self.player.inventory.shield = Some(eq.clone());
+                        log_msg = Some(format!("Equipped shield: {}.", eq.name));
+                    }
+                }
+
+                let inv = &mut self.player.inventory;
+                if inv.backpack.is_empty() {
+                    inv.backpack_cursor = 0;
+                } else if inv.backpack_cursor >= inv.backpack.len() {
+                    inv.backpack_cursor = inv.backpack.len() - 1;
+                }
+            } else {
+                log_msg = Some("Nothing to equip.".to_string());
+            }
+        }
+
+        InvSelection::None => {
+            log_msg = Some("Nothing to use.".to_string());
         }
     }
+
+    if let Some(m) = log_msg {
+        self.push_log(m);
+    }
+}
+
 
     fn start_chest_dialogue(&mut self, room: usize, x: i32, y: i32, item: Option<Consumable>) {
         let name = item
@@ -876,6 +914,7 @@ impl World {
     }
 
     pub fn apply_action(&mut self, action: Action) -> bool {
+        self.player.purge_expired_buffs();
         match self.state {
             GameState::Title => match action {
                 Action::Confirm => self.state = GameState::Intro,

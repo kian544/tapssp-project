@@ -1,4 +1,5 @@
 use crate::map::Map;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EquipSlot {
@@ -21,6 +22,14 @@ pub struct Consumable {
     pub heal: i32,
     pub atk_bonus: i32,
     pub def_bonus: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct TempBuff {
+    pub atk_bonus: i32,
+    pub def_bonus: i32,
+    pub speed_bonus: i32,
+    pub expires_at: Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,6 +190,8 @@ pub struct Player {
     pub base_speed: i32,
 
     pub inventory: Inventory,
+    pub buffs: Vec<TempBuff>,
+
 }
 
 impl Player {
@@ -195,8 +206,43 @@ impl Player {
             base_defense: 8,
             base_speed: 5,
             inventory: Inventory::default_loadout(),
+            buffs: Vec::new(),
         }
     }
+
+    pub fn add_temp_buff(&mut self, atk: i32, def: i32, speed: i32, duration: Duration) {
+    if atk == 0 && def == 0 && speed == 0 {
+        return;
+    }
+    self.buffs.push(TempBuff {
+        atk_bonus: atk,
+        def_bonus: def,
+        speed_bonus: speed,
+        expires_at: Instant::now() + duration,
+    });
+}
+
+    pub fn purge_expired_buffs(&mut self) {
+        let now = Instant::now();
+        self.buffs.retain(|b| b.expires_at > now);
+    }
+
+    fn active_buff_sums(&self) -> (i32, i32, i32) {
+        let now = Instant::now();
+        let mut atk = 0;
+        let mut def = 0;
+        let mut spd = 0;
+
+        for b in &self.buffs {
+            if b.expires_at > now {
+                atk += b.atk_bonus;
+                def += b.def_bonus;
+                spd += b.speed_bonus;
+            }
+        }
+        (atk, def, spd)
+    }
+
 
     pub fn attack(&self) -> i32 {
         let mut v = self.base_attack;
@@ -206,8 +252,11 @@ impl Player {
         if let Some(sh) = &self.inventory.shield {
             v += sh.atk_bonus;
         }
+        let (atk_b, _, _) = self.active_buff_sums();
+        v += atk_b;
         v
     }
+
 
     pub fn defense(&self) -> i32 {
         let mut v = self.base_defense;
@@ -217,8 +266,11 @@ impl Player {
         if let Some(sh) = &self.inventory.shield {
             v += sh.def_bonus;
         }
+        let (_, def_b, _) = self.active_buff_sums();
+        v += def_b;
         v
     }
+
 
     pub fn speed(&self) -> i32 {
         let mut v = self.base_speed;
@@ -228,8 +280,11 @@ impl Player {
         if let Some(sh) = &self.inventory.shield {
             v += sh.speed_bonus;
         }
+        let (_, _, spd_b) = self.active_buff_sums();
+        v += spd_b;
         v
     }
+
 
     pub fn equip_sword(&mut self, eq: Equipment) {
         self.inventory.sword = Some(eq);
