@@ -1,9 +1,9 @@
-use crate::engine::world::World;
+use crate::engine::world::{World, GameState};
 use crate::map::tile::Tile;
 
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap, Clear},
     Frame,
@@ -48,6 +48,57 @@ pub fn render(f: &mut Frame, world: &World) {
         return;
     }
 
+    match world.state {
+        GameState::Title => draw_title(f, size),
+        GameState::Intro => draw_intro_static(f, size, world),
+        GameState::Playing => draw_playing(f, size, world),
+    }
+}
+
+fn draw_title(f: &mut Frame, area: Rect) {
+    let lines = vec![
+        Line::from(Span::styled(
+            "Sunny Day",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "By Kian Kakavandi",
+            Style::default().fg(Color::White),
+        )),
+        Line::from(""),
+        Line::from("Click space to continue"),
+    ];
+
+    let title = Paragraph::new(lines)
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL));
+
+    f.render_widget(title, area);
+}
+
+fn draw_intro_static(f: &mut Frame, area: Rect, world: &World) {
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        "INTRO",
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
+    for l in world.intro_lines() {
+        lines.push(Line::from(l.clone()));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from("Click space to start"));
+
+    let intro = Paragraph::new(lines)
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL))
+        .wrap(Wrap { trim: true });
+
+    f.render_widget(intro, area);
+}
+
+fn draw_playing(f: &mut Frame, size: Rect, world: &World) {
     let log_h = (size.height / 4).clamp(5, 10);
 
     let vertical = Layout::default()

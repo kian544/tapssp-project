@@ -13,6 +13,13 @@ pub struct Level {
     pub door: (i32, i32),
 }
 
+#[derive(Debug, Clone)]
+pub enum GameState {
+    Title,
+    Intro,
+    Playing,
+}
+
 pub struct World {
     pub levels: Vec<Level>,     // exactly 2 rooms
     pub current: usize,         // 0 = Room 1, 1 = Room 2
@@ -20,11 +27,16 @@ pub struct World {
     pub logs: VecDeque<String>,
     pub seed: u64,
     pub inventory_open: bool,
+    pub state: GameState,
+
+    intro_lines: Vec<String>,
 }
 
 impl World {
     pub fn new(seed: u64, width: usize, height: usize) -> Self {
+        // Room 1
         let (level0, spawn0) = Self::make_level(seed, 0, width, height);
+        // Room 2
         let (level1, _spawn1) = Self::make_level(seed, 1, width, height);
 
         let mut logs = VecDeque::new();
@@ -34,6 +46,8 @@ impl World {
         logs.push_back("Press I to open inventory.".to_string());
         logs.push_back("Find the white door to enter Room 2.".to_string());
 
+        let intro_lines = Self::build_intro_lines();
+
         Self {
             levels: vec![level0, level1],
             current: 0,
@@ -41,7 +55,23 @@ impl World {
             logs,
             seed,
             inventory_open: false,
+            state: GameState::Title,
+            intro_lines,
         }
+    }
+
+    fn build_intro_lines() -> Vec<String> {
+        vec![
+            "Welcome to the Sunny Day, where everything was once bright".to_string(),
+            "and happy, is now in despair.".to_string(),
+            "".to_string(),
+            "It is up to you, to bring sunny times back.".to_string(),
+            "Listen to its people, understand your mission.".to_string(),
+        ]
+    }
+
+    pub fn intro_lines(&self) -> &[String] {
+        &self.intro_lines
     }
 
     fn current_level(&self) -> &Level {
@@ -64,6 +94,7 @@ impl World {
         let (sx, sy) = map.find_first_floor().unwrap_or((1, 1));
         let spawn = (sx as i32, sy as i32);
 
+        // One door per room
         let door = Self::place_random_door(&mut map, seed ^ 0xD00D, spawn);
 
         (Level { map, door }, spawn)
@@ -141,57 +172,79 @@ impl World {
     }
 
     pub fn apply_action(&mut self, action: Action) -> bool {
-        match action {
-            Action::ToggleInventory => {
-                self.toggle_inventory();
-                true
-            }
-
-            Action::InventoryUp => {
-                if self.inventory_open {
-                    self.player.inventory.move_selection(-1);
+        match self.state {
+            GameState::Title => {
+                match action {
+                    Action::Confirm => self.state = GameState::Intro,
+                    Action::Quit => return false,
+                    _ => {}
                 }
                 true
             }
 
-            Action::InventoryDown => {
-                if self.inventory_open {
-                    self.player.inventory.move_selection(1);
+            GameState::Intro => {
+                match action {
+                    Action::Confirm => self.state = GameState::Playing,
+                    Action::Quit => return false,
+                    _ => {}
                 }
                 true
             }
 
-            Action::UseConsumable => {
-                if self.inventory_open {
-                    self.use_selected_consumable();
+            GameState::Playing => {
+                match action {
+                    Action::ToggleInventory => {
+                        self.toggle_inventory();
+                        true
+                    }
+
+                    Action::InventoryUp => {
+                        if self.inventory_open {
+                            self.player.inventory.move_selection(-1);
+                        }
+                        true
+                    }
+
+                    Action::InventoryDown => {
+                        if self.inventory_open {
+                            self.player.inventory.move_selection(1);
+                        }
+                        true
+                    }
+
+                    Action::UseConsumable => {
+                        if self.inventory_open {
+                            self.use_selected_consumable();
+                        }
+                        true
+                    }
+
+                    Action::Move(dx, dy) => {
+                        if self.inventory_open {
+                            return true;
+                        }
+
+                        let old = (self.player.x, self.player.y);
+                        let map_snapshot = self.current_map().clone();
+                        self.player.try_move(dx, dy, &map_snapshot);
+
+                        let newp = (self.player.x, self.player.y);
+                        if old != newp {
+                            self.push_log(format!("Player moved to ({}, {})", newp.0, newp.1));
+                        }
+
+                        let tile = self.current_map().get(newp.0 as usize, newp.1 as usize);
+                        if tile == Tile::Door {
+                            self.toggle_room();
+                        }
+                        true
+                    }
+
+                    Action::Quit => false,
+                    Action::None => true,
+                    Action::Confirm => true,
                 }
-                true
             }
-
-            Action::Move(dx, dy) => {
-                if self.inventory_open {
-                    return true; // movement disabled while menu open
-                }
-
-                let old = (self.player.x, self.player.y);
-                let map_snapshot = self.current_map().clone();
-                self.player.try_move(dx, dy, &map_snapshot);
-
-                let newp = (self.player.x, self.player.y);
-                if old != newp {
-                    self.push_log(format!("Player moved to ({}, {})", newp.0, newp.1));
-                }
-
-                let tile = self.current_map().get(newp.0 as usize, newp.1 as usize);
-                if tile == Tile::Door {
-                    self.toggle_room();
-                }
-
-                true
-            }
-
-            Action::Quit => false,
-            Action::None => true,
         }
     }
 }

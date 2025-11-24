@@ -1,7 +1,7 @@
-use crate::engine::action::Action;
-use crate::engine::world::World;
-use crate::tui::{input::is_press, renderer::render};
 use crate::audio::Music;
+use crate::engine::action::Action;
+use crate::engine::world::{World, GameState};
+use crate::tui::{input::is_press, renderer::render};
 
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
@@ -19,7 +19,7 @@ use std::{
 const MOVE_COOLDOWN_MS: u64 = 90;
 
 pub fn run() -> std::io::Result<()> {
-    // ---- start background music (non-fatal if missing) ----
+    // ---- start background music right away ----
     let _music = match Music::start_loop("assets/Background1.mp3") {
         Ok(m) => Some(m),
         Err(e) => {
@@ -34,16 +34,14 @@ pub fn run() -> std::io::Result<()> {
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    terminal.clear()?; // clean first frame
+    terminal.clear()?;
 
-    // ---- game init ----
     let seed = rand::random::<u64>();
     let mut world = World::new(seed, 80, 45);
 
     let tick_rate = Duration::from_millis(60);
     let mut last_move_time = Instant::now() - Duration::from_millis(MOVE_COOLDOWN_MS);
 
-    // ---- main loop ----
     let mut running = true;
     while running {
         if let Err(_) = terminal.draw(|f| render(f, &world)) {
@@ -64,26 +62,38 @@ pub fn run() -> std::io::Result<()> {
                         continue;
                     }
 
-                    let mut action = if world.inventory_open {
-                        match key.code {
-                            KeyCode::Char('i') | KeyCode::Char('I') | KeyCode::Esc => Action::ToggleInventory,
-                            KeyCode::Up | KeyCode::Char('w') | KeyCode::Char('W') => Action::InventoryUp,
-                            KeyCode::Down | KeyCode::Char('s') | KeyCode::Char('S') => Action::InventoryDown,
-                            KeyCode::Char(' ') => Action::UseConsumable,
-                            KeyCode::Char('q') | KeyCode::Char('Q') => Action::Quit,
-                            _ => Action::None,
+                    let mut action = match world.state {
+                        GameState::Title | GameState::Intro => {
+                            match key.code {
+                                KeyCode::Char(' ') | KeyCode::Enter => Action::Confirm,
+                                KeyCode::Char('q') | KeyCode::Char('Q') => Action::Quit,
+                                _ => Action::None,
+                            }
                         }
-                    } else {
-                        match key.code {
-                            KeyCode::Char('q') | KeyCode::Char('Q') => Action::Quit,
-                            KeyCode::Char('i') | KeyCode::Char('I') => Action::ToggleInventory,
 
-                            KeyCode::Up | KeyCode::Char('w') | KeyCode::Char('W') => Action::Move(0, -1),
-                            KeyCode::Down | KeyCode::Char('s') | KeyCode::Char('S') => Action::Move(0, 1),
-                            KeyCode::Left | KeyCode::Char('a') | KeyCode::Char('A') => Action::Move(-1, 0),
-                            KeyCode::Right | KeyCode::Char('d') | KeyCode::Char('D') => Action::Move(1, 0),
+                        GameState::Playing => {
+                            if world.inventory_open {
+                                match key.code {
+                                    KeyCode::Char('i') | KeyCode::Char('I') | KeyCode::Esc => Action::ToggleInventory,
+                                    KeyCode::Up | KeyCode::Char('w') | KeyCode::Char('W') => Action::InventoryUp,
+                                    KeyCode::Down | KeyCode::Char('s') | KeyCode::Char('S') => Action::InventoryDown,
+                                    KeyCode::Char(' ') => Action::UseConsumable,
+                                    KeyCode::Char('q') | KeyCode::Char('Q') => Action::Quit,
+                                    _ => Action::None,
+                                }
+                            } else {
+                                match key.code {
+                                    KeyCode::Char('q') | KeyCode::Char('Q') => Action::Quit,
+                                    KeyCode::Char('i') | KeyCode::Char('I') => Action::ToggleInventory,
 
-                            _ => Action::None,
+                                    KeyCode::Up | KeyCode::Char('w') | KeyCode::Char('W') => Action::Move(0, -1),
+                                    KeyCode::Down | KeyCode::Char('s') | KeyCode::Char('S') => Action::Move(0, 1),
+                                    KeyCode::Left | KeyCode::Char('a') | KeyCode::Char('A') => Action::Move(-1, 0),
+                                    KeyCode::Right | KeyCode::Char('d') | KeyCode::Char('D') => Action::Move(1, 0),
+
+                                    _ => Action::None,
+                                }
+                            }
                         }
                     };
 
@@ -106,7 +116,6 @@ pub fn run() -> std::io::Result<()> {
         }
     }
 
-    // ---- restore terminal ----
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),

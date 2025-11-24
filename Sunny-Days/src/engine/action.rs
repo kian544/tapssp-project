@@ -7,6 +7,8 @@ pub enum Action {
     InventoryDown,
     UseConsumable,
 
+    Confirm, // space/enter to advance title/intro
+
     Quit,
     None,
 }

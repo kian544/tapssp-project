@@ -6,7 +6,7 @@ use std::{
 };
 
 pub struct Music {
-    // Keep stream alive for the life of the program
+    // Keep stream alive for life of program
     _stream: OutputStream,
     sink: Sink,
 }
@@ -17,12 +17,9 @@ impl Music {
         let (_stream, stream_handle) = OutputStream::try_default()?;
         let sink = Sink::try_new(&stream_handle)?;
 
-        // Make path absolute relative to project root if it's relative.
         let abs_path = make_abs(path.as_ref());
         let file = File::open(&abs_path)?;
-        
-        // Use MP3 hint decoder (now supported via feature flag)
-        let source = Decoder::new_mp3(BufReader::new(file))?.repeat_infinite();
+        let source = Decoder::new(BufReader::new(file))?.repeat_infinite();
 
         sink.append(source);
         sink.play();
