@@ -1,8 +1,15 @@
 use crate::map::Map;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EquipSlot {
+    Sword,
+    Shield,
+}
+
 #[derive(Debug, Clone)]
 pub struct Equipment {
     pub name: String,
+    pub slot: EquipSlot,     // NEW: tells backpack where it equips
     pub atk_bonus: i32,
     pub def_bonus: i32,
     pub speed_bonus: i32,
@@ -31,7 +38,6 @@ pub struct Inventory {
     pub consumables: Vec<Consumable>, // up to 10 later
     pub backpack: Vec<Equipment>,     // unequipped gear
 
-    // Tab + per-tab cursors
     pub tab: InvTab,
     pub weapon_cursor: usize,      // 0 sword, 1 shield
     pub consumable_cursor: usize,  // 0..len-1
@@ -68,7 +74,6 @@ impl Inventory {
             InvTab::Backpack => InvTab::Weapons,
         };
 
-        // Clamp cursors to valid ranges
         if self.weapon_cursor > 1 {
             self.weapon_cursor = 1;
         }

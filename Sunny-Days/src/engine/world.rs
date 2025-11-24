@@ -1,5 +1,5 @@
 use crate::engine::action::Action;
-use crate::engine::entity::{Equipment, Player, InvSelection, InvTab};
+use crate::engine::entity::{Equipment, Player, InvSelection, InvTab, EquipSlot};
 use crate::map::{generator::generate_rooms_and_corridors, tile::Tile, Map};
 
 use rand::{Rng, SeedableRng};
@@ -304,46 +304,91 @@ impl World {
         }
     }
 
-    fn use_or_unequip(&mut self) {
-        let inv = &mut self.player.inventory;
+    // ✅ FIXED: no long-lived &mut borrow while logging
+    fn use_or_unequip_or_equip(&mut self) {
+        let selection = self.player.inventory.selection();
+        let mut log_msg: Option<String> = None;
 
-        match inv.selection() {
+        match selection {
             InvSelection::SwordSlot => {
-                if let Some(eq) = inv.sword.take() {
-                    inv.backpack.push(eq.clone());
-                    self.push_log(format!("Unequipped {}.", eq.name));
+                let eq_opt = self.player.inventory.sword.take();
+                if let Some(eq) = eq_opt {
+                    self.player.inventory.backpack.push(eq.clone());
+                    log_msg = Some(format!("Unequipped {}.", eq.name));
                 } else {
-                    self.push_log("No sword equipped.".to_string());
+                    log_msg = Some("No sword equipped.".to_string());
                 }
             }
 
             InvSelection::ShieldSlot => {
-                if let Some(eq) = inv.shield.take() {
-                    inv.backpack.push(eq.clone());
-                    self.push_log(format!("Unequipped {}.", eq.name));
+                let eq_opt = self.player.inventory.shield.take();
+                if let Some(eq) = eq_opt {
+                    self.player.inventory.backpack.push(eq.clone());
+                    log_msg = Some(format!("Unequipped {}.", eq.name));
                 } else {
-                    self.push_log("No shield equipped.".to_string());
+                    log_msg = Some("No shield equipped.".to_string());
                 }
             }
 
             InvSelection::Consumable(_) => {
-                if let Some(item) = inv.take_selected_consumable() {
+                let item_opt = self.player.inventory.take_selected_consumable();
+                if let Some(item) = item_opt {
                     let before = self.player.hp;
                     self.player.hp = (self.player.hp + item.heal).min(self.player.max_hp);
                     let healed = self.player.hp - before;
-                    self.push_log(format!("Used {} (+{} HP).", item.name, healed));
+                    log_msg = Some(format!("Used {} (+{} HP).", item.name, healed));
                 } else {
-                    self.push_log("No consumables to use.".to_string());
+                    log_msg = Some("No consumables to use.".to_string());
                 }
             }
 
-            InvSelection::BackpackItem(_) => {
-                self.push_log("Backpack equipping not implemented yet.".to_string());
+            InvSelection::BackpackItem(i) => {
+                let eq_opt = {
+                    let inv = &mut self.player.inventory;
+                    if i >= inv.backpack.len() {
+                        None
+                    } else {
+                        Some(inv.backpack.remove(i))
+                    }
+                };
+
+                if let Some(eq) = eq_opt {
+                    match eq.slot {
+                        EquipSlot::Sword => {
+                            if let Some(old) = self.player.inventory.sword.take() {
+                                self.player.inventory.backpack.push(old);
+                            }
+                            self.player.inventory.sword = Some(eq.clone());
+                            log_msg = Some(format!("Equipped sword: {}.", eq.name));
+                        }
+                        EquipSlot::Shield => {
+                            if let Some(old) = self.player.inventory.shield.take() {
+                                self.player.inventory.backpack.push(old);
+                            }
+                            self.player.inventory.shield = Some(eq.clone());
+                            log_msg = Some(format!("Equipped shield: {}.", eq.name));
+                        }
+                    }
+
+                    // clamp backpack cursor after removal
+                    let inv = &mut self.player.inventory;
+                    if inv.backpack.is_empty() {
+                        inv.backpack_cursor = 0;
+                    } else if inv.backpack_cursor >= inv.backpack.len() {
+                        inv.backpack_cursor = inv.backpack.len() - 1;
+                    }
+                } else {
+                    log_msg = Some("Nothing to equip.".to_string());
+                }
             }
 
             InvSelection::None => {
-                self.push_log("Nothing to use.".to_string());
+                log_msg = Some("Nothing to use.".to_string());
             }
+        }
+
+        if let Some(m) = log_msg {
+            self.push_log(m);
         }
     }
 
@@ -446,6 +491,7 @@ impl World {
                 if up == 'A' {
                     self.player.equip_sword(Equipment {
                         name: "Basic Sword".to_string(),
+                        slot: EquipSlot::Sword,
                         atk_bonus: 3,
                         def_bonus: 0,
                         speed_bonus: 3,
@@ -456,6 +502,7 @@ impl World {
                 } else if up == 'B' {
                     self.player.equip_shield(Equipment {
                         name: "Basic Shield".to_string(),
+                        slot: EquipSlot::Shield,
                         atk_bonus: 0,
                         def_bonus: 3,
                         speed_bonus: -2,
@@ -535,7 +582,7 @@ impl World {
 
                     Action::UseConsumable => {
                         if self.inventory_open {
-                            self.use_or_unequip();
+                            self.use_or_unequip_or_equip();
                         }
                         true
                     }
