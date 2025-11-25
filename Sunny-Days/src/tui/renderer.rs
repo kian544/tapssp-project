@@ -307,7 +307,7 @@ fn draw_map(f: &mut Frame, area: Rect, world: &World) {
 
     let map_widget = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title("Map"))
-        .wrap(Wrap { trim: false }); // Map should NOT trim or wrap in a standard way to preserve grid
+        .wrap(Wrap { trim: false });
 
     f.render_widget(map_widget, area);
 }
@@ -383,12 +383,13 @@ fn draw_sidebar(f: &mut Frame, area: Rect, world: &World) {
                     && matches!(inv.selection(), InvSelection::SwordSlot)
                 {
                     format!(
-                        "{} Sword : {} ({} ATK, {} DEF, {} SPD) [Space to unequip]",
+                        "{} Sword : {} ({} ATK, {} DEF, {} SPD, {} HP) [Space to unequip]",
                         sword_marker,
                         sw.name,
                         fmt_bonus(sw.atk_bonus),
                         fmt_bonus(sw.def_bonus),
                         fmt_bonus(sw.speed_bonus),
+                        fmt_bonus(sw.hp_bonus),
                     )
                 } else {
                     format!("{} Sword : {}", sword_marker, sw.name)
@@ -412,12 +413,13 @@ fn draw_sidebar(f: &mut Frame, area: Rect, world: &World) {
                     && matches!(inv.selection(), InvSelection::ShieldSlot)
                 {
                     format!(
-                        "{} Shield: {} ({} ATK, {} DEF, {} SPD) [Space to unequip]",
+                        "{} Shield: {} ({} ATK, {} DEF, {} SPD, {} HP) [Space to unequip]",
                         shield_marker,
                         sh.name,
                         fmt_bonus(sh.atk_bonus),
                         fmt_bonus(sh.def_bonus),
                         fmt_bonus(sh.speed_bonus),
+                        fmt_bonus(sh.hp_bonus),
                     )
                 } else {
                     format!("{} Shield: {}", shield_marker, sh.name)

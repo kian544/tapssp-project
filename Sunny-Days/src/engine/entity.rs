@@ -10,7 +10,8 @@ pub enum EquipSlot {
 #[derive(Debug, Clone)]
 pub struct Equipment {
     pub name: String,
-    pub slot: EquipSlot,     // NEW: tells backpack where it equips
+    pub slot: EquipSlot,
+    pub hp_bonus: i32, // NEW: Equipment can now modify Max HP
     pub atk_bonus: i32,
     pub def_bonus: i32,
     pub speed_bonus: i32,
@@ -44,13 +45,13 @@ pub struct Inventory {
     pub sword: Option<Equipment>,
     pub shield: Option<Equipment>,
 
-    pub consumables: Vec<Consumable>, // up to 10 later
-    pub backpack: Vec<Equipment>,     // unequipped gear
+    pub consumables: Vec<Consumable>, 
+    pub backpack: Vec<Equipment>,
 
     pub tab: InvTab,
-    pub weapon_cursor: usize,      // 0 sword, 1 shield
-    pub consumable_cursor: usize,  // 0..len-1
-    pub backpack_cursor: usize,    // 0..len-1
+    pub weapon_cursor: usize,
+    pub consumable_cursor: usize,
+    pub backpack_cursor: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -191,7 +192,6 @@ pub struct Player {
 
     pub inventory: Inventory,
     pub buffs: Vec<TempBuff>,
-
 }
 
 impl Player {
@@ -211,16 +211,16 @@ impl Player {
     }
 
     pub fn add_temp_buff(&mut self, atk: i32, def: i32, speed: i32, duration: Duration) {
-    if atk == 0 && def == 0 && speed == 0 {
-        return;
+        if atk == 0 && def == 0 && speed == 0 {
+            return;
+        }
+        self.buffs.push(TempBuff {
+            atk_bonus: atk,
+            def_bonus: def,
+            speed_bonus: speed,
+            expires_at: Instant::now() + duration,
+        });
     }
-    self.buffs.push(TempBuff {
-        atk_bonus: atk,
-        def_bonus: def,
-        speed_bonus: speed,
-        expires_at: Instant::now() + duration,
-    });
-}
 
     pub fn purge_expired_buffs(&mut self) {
         let now = Instant::now();
@@ -243,7 +243,6 @@ impl Player {
         (atk, def, spd)
     }
 
-
     pub fn attack(&self) -> i32 {
         let mut v = self.base_attack;
         if let Some(sw) = &self.inventory.sword {
@@ -256,7 +255,6 @@ impl Player {
         v += atk_b;
         v
     }
-
 
     pub fn defense(&self) -> i32 {
         let mut v = self.base_defense;
@@ -271,7 +269,6 @@ impl Player {
         v
     }
 
-
     pub fn speed(&self) -> i32 {
         let mut v = self.base_speed;
         if let Some(sw) = &self.inventory.sword {
@@ -284,7 +281,6 @@ impl Player {
         v += spd_b;
         v
     }
-
 
     pub fn equip_sword(&mut self, eq: Equipment) {
         self.inventory.sword = Some(eq);

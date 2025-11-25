@@ -8,7 +8,7 @@ use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 
 use std::collections::VecDeque;
-use std::time::Duration; // Removed Instant
+use std::time::Duration;
 
 #[derive(Clone)]
 pub struct Chest {
@@ -298,10 +298,10 @@ impl World {
         let (sx, sy) = map.find_first_floor().unwrap_or((1, 1));
         let spawn = (sx as i32, sy as i32);
         let door = Self::place_random_door(&mut map, seed ^ 0xD00D, spawn);
-        let mut chests = Vec::new();
-        if depth == 0 {
-            chests = Self::scatter_chests(&mut map, seed ^ 0xC1E57, spawn, door);
-        }
+        
+        // Random chests for consumables (in Room 1 and Room 2 now)
+        let chests = Self::scatter_chests(&mut map, seed ^ 0xC1E57, spawn, door);
+        
         (Level { map, door, chests }, spawn)
     }
 
@@ -414,6 +414,8 @@ impl World {
             InvSelection::SwordSlot => {
                 let eq_opt = self.player.inventory.sword.take();
                 if let Some(eq) = eq_opt {
+                    self.player.max_hp -= eq.hp_bonus; // Remove HP bonus
+                    if self.player.hp > self.player.max_hp { self.player.hp = self.player.max_hp; }
                     self.player.inventory.backpack.push(eq.clone());
                     log_msg = Some(format!("Unequipped {}.", eq.name));
                 } else { log_msg = Some("No sword equipped.".to_string()); }
@@ -421,6 +423,8 @@ impl World {
             InvSelection::ShieldSlot => {
                 let eq_opt = self.player.inventory.shield.take();
                 if let Some(eq) = eq_opt {
+                    self.player.max_hp -= eq.hp_bonus; // Remove HP bonus
+                    if self.player.hp > self.player.max_hp { self.player.hp = self.player.max_hp; }
                     self.player.inventory.backpack.push(eq.clone());
                     log_msg = Some(format!("Unequipped {}.", eq.name));
                 } else { log_msg = Some("No shield equipped.".to_string()); }
@@ -444,18 +448,30 @@ impl World {
             InvSelection::BackpackItem(i) => {
                 let eq_opt = if i < self.player.inventory.backpack.len() { Some(self.player.inventory.backpack.remove(i)) } else { None };
                 if let Some(eq) = eq_opt {
+                    // Add new HP bonus
+                    self.player.max_hp += eq.hp_bonus;
+                    
                     match eq.slot {
                         Slot::Sword => {
-                            if let Some(old) = self.player.inventory.sword.take() { self.player.inventory.backpack.push(old); }
+                            if let Some(old) = self.player.inventory.sword.take() { 
+                                self.player.max_hp -= old.hp_bonus; // Remove old bonus
+                                self.player.inventory.backpack.push(old); 
+                            }
                             self.player.inventory.sword = Some(eq.clone());
                             log_msg = Some(format!("Equipped sword: {}.", eq.name));
                         }
                         Slot::Shield => {
-                            if let Some(old) = self.player.inventory.shield.take() { self.player.inventory.backpack.push(old); }
+                            if let Some(old) = self.player.inventory.shield.take() { 
+                                self.player.max_hp -= old.hp_bonus; // Remove old bonus
+                                self.player.inventory.backpack.push(old); 
+                            }
                             self.player.inventory.shield = Some(eq.clone());
                             log_msg = Some(format!("Equipped shield: {}.", eq.name));
                         }
                     }
+                    // Clamp HP if max reduced
+                    if self.player.hp > self.player.max_hp { self.player.hp = self.player.max_hp; }
+                    
                     let inv = &mut self.player.inventory;
                     if inv.backpack.is_empty() { inv.backpack_cursor = 0; } else if inv.backpack_cursor >= inv.backpack.len() { inv.backpack_cursor = inv.backpack.len() - 1; }
                 } else { log_msg = Some("Nothing to equip.".to_string()); }
@@ -492,6 +508,7 @@ impl World {
         }
     }
 
+    // --- BATTLE LOGIC ---
     fn start_battle(&mut self, enemy_id: NpcId) {
         let (name, hp, atk, def, spd) = match enemy_id {
             NpcId::Shab => ("Shab", 10, 3, 0, 4),
@@ -528,7 +545,6 @@ impl World {
         let mut end_battle = false;
         let mut player_won = false;
 
-        // Take ownership of battle session temporarily to avoid mutable borrow conflicts
         if let Some(mut bs) = self.battle.take() {
             if penalty { bs.penalty_mode = true; }
             let p_spd = self.player.speed();
@@ -573,7 +589,6 @@ impl World {
                 end_battle = true;
             }
 
-            // Place battle session back if battle continues
             if !end_battle {
                 self.battle = Some(bs);
             } else {
@@ -617,7 +632,9 @@ impl World {
             }
             NpcId::Mah => {
                 self.mah_defeated = true;
-                if let Some(pos) = self.npcs.iter().position(|n| n.id == NpcId::Mah) {
+                
+                // Remove boss and spawn Weeping Dagger Chest
+                let boss_pos = if let Some(pos) = self.npcs.iter().position(|n| n.id == NpcId::Mah) {
                     let npc = self.npcs.remove(pos);
                     let chest = Chest {
                         x: npc.x, y: npc.y,
@@ -625,13 +642,38 @@ impl World {
                         weapon: Some(Equipment {
                             name: "Weeping Dagger".to_string(),
                             slot: Slot::Sword,
-                            atk_bonus: -100, def_bonus: -100, speed_bonus: -100,
+                            hp_bonus: -100, atk_bonus: -100, def_bonus: -100, speed_bonus: -100,
                         }),
                         opened: false
                     };
                     self.levels[1].chests.push(chest);
                     self.levels[1].map.set(npc.x as usize, npc.y as usize, Tile::Chest);
+                    Some((npc.x, npc.y))
+                } else { None };
+
+                // Spawn Shield of Healing Chest (Random location in Room 2, away from dagger)
+                if let Some((bx, by)) = boss_pos {
+                    // Create taken list including boss loc, door, existing chests
+                    let mut taken = vec![(bx, by), self.levels[1].door];
+                    for c in &self.levels[1].chests { taken.push((c.x, c.y)); }
+                    
+                    // Find spot with dist >= 10 from Dagger chest
+                    let (sx, sy) = self.random_floor_spaced(1, &taken, 10);
+                    
+                    let shield_chest = Chest {
+                        x: sx, y: sy,
+                        item: None,
+                        weapon: Some(Equipment {
+                            name: "Shield of healing".to_string(),
+                            slot: Slot::Shield,
+                            hp_bonus: 2, atk_bonus: 0, def_bonus: 10, speed_bonus: 0,
+                        }),
+                        opened: false
+                    };
+                    self.levels[1].chests.push(shield_chest);
+                    self.levels[1].map.set(sx as usize, sy as usize, Tile::Chest);
                 }
+
                 self.start_dialogue_raw("Mah", vec![
                     "I underestimated you…".to_string(),
                     "Listen, Sol, is not…".to_string(), "what".to_string(), "you".to_string(), "thin-".to_string()
@@ -655,6 +697,7 @@ impl World {
 
     fn start_dialogue_for(&mut self, npc: &Npc) {
         let session = match npc.id {
+            // Existing NPCs
             NpcId::MayorSol => {
                  if self.mayor_done { DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Well, what’re you still standing here for? GO TO NOOR!".to_string()], page_index: 0, awaiting: None } } 
                  else { DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Welcome to Sunny Days, visitor! I am Mayor Sol. We are normally much more able to take in tourists, but you may have arrived at a bad time. The Weeping have made it a rough time, they have completely taken over the Weeping Willow forests.".to_string(), "What’s that? The weeping sound like they belong in the Weeping Willow Forests? No! That’s nonsense, the only reason they are called the weeping, is because they WEEP before they kill! I mean, is it not right there in the name? Keep up! Ok, but my friend, you MUST help us get them out. Without our Weeping Willow bark, we are losing our health! Please will you help? (Y/N)".to_string()], page_index: 0, awaiting: Some(AwaitingChoice::YesNoMayor) } }
@@ -745,8 +788,8 @@ impl World {
             }
             Some(AwaitingChoice::ABNoorWeapon) => {
                 if up == 'A' || up == 'B' {
-                    if up == 'A' { self.player.equip_sword(Equipment { name: "Basic Sword".to_string(), slot: Slot::Sword, atk_bonus: 3, def_bonus: 0, speed_bonus: 3 }); } 
-                    else { self.player.equip_shield(Equipment { name: "Basic Shield".to_string(), slot: Slot::Shield, atk_bonus: 0, def_bonus: 3, speed_bonus: -2 }); }
+                    if up == 'A' { self.player.equip_sword(Equipment { name: "Basic Sword".to_string(), slot: Slot::Sword, hp_bonus: 0, atk_bonus: 3, def_bonus: 0, speed_bonus: 3 }); } 
+                    else { self.player.equip_shield(Equipment { name: "Basic Shield".to_string(), slot: Slot::Shield, hp_bonus: 0, atk_bonus: 0, def_bonus: 3, speed_bonus: -2 }); }
                     self.noor_done = true;
                     if let Some(d) = &mut self.dialogue { d.awaiting = None; d.page_index = 2; }
                 }
@@ -849,8 +892,8 @@ impl World {
                         if self.noor_done && npc.id == NpcId::Lamp && !self.lamp_done {
                             let ms = self.player.inventory.sword.is_none();
                             let msh = self.player.inventory.shield.is_none();
-                            if ms { self.player.equip_sword(Equipment { name: "Basic Sword".to_string(), slot: Slot::Sword, atk_bonus: 3, def_bonus: 0, speed_bonus: 3 }); self.lamp_done = true; }
-                            else if msh { self.player.equip_shield(Equipment { name: "Basic Shield".to_string(), slot: Slot::Shield, atk_bonus: 0, def_bonus: 3, speed_bonus: -2 }); self.lamp_done = true; }
+                            if ms { self.player.equip_sword(Equipment { name: "Basic Sword".to_string(), slot: Slot::Sword, hp_bonus: 0, atk_bonus: 3, def_bonus: 0, speed_bonus: 3 }); self.lamp_done = true; }
+                            else if msh { self.player.equip_shield(Equipment { name: "Basic Shield".to_string(), slot: Slot::Shield, hp_bonus: 0, atk_bonus: 0, def_bonus: 3, speed_bonus: -2 }); self.lamp_done = true; }
                         }
                     } else {
                         if let Some(_) = self.door_near_player() {
