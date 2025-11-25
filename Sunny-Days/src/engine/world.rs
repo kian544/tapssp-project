@@ -467,9 +467,26 @@ impl World {
         let new_room = if old_room == 0 { 1 } else { 0 };
         self.current = new_room;
 
-        let target = self.levels[new_room].door;
-        self.player.x = target.0;
-        self.player.y = target.1;
+        // Since the door is now an obstacle, we must spawn NEXT to it.
+        let door_pos = self.levels[new_room].door;
+        let map = &self.levels[new_room].map;
+        let mut spawn = door_pos; // Fallback if no floor found (should unlikely happen)
+        
+        // Find a valid floor tile adjacent to the door
+        'search: for dy in -1..=1 {
+            for dx in -1..=1 {
+                if dx == 0 && dy == 0 { continue; }
+                let nx = door_pos.0 + dx;
+                let ny = door_pos.1 + dy;
+                if map.in_bounds(nx, ny) && map.get(nx as usize, ny as usize) == Tile::Floor {
+                    spawn = (nx, ny);
+                    break 'search;
+                }
+            }
+        }
+
+        self.player.x = spawn.0;
+        self.player.y = spawn.1;
 
         if new_room == 1 {
             self.push_log("You step through the door into Room 2...".to_string());
@@ -514,120 +531,120 @@ impl World {
         }
     }
 
-fn use_or_unequip_or_equip(&mut self) {
-    let selection = self.player.inventory.selection();
-    let mut log_msg: Option<String> = None;
+    fn use_or_unequip_or_equip(&mut self) {
+        let selection = self.player.inventory.selection();
+        let mut log_msg: Option<String> = None;
 
-    match selection {
-        InvSelection::SwordSlot => {
-            let eq_opt = self.player.inventory.sword.take();
-            if let Some(eq) = eq_opt {
-                self.player.inventory.backpack.push(eq.clone());
-                log_msg = Some(format!("Unequipped {}.", eq.name));
-            } else {
-                log_msg = Some("No sword equipped.".to_string());
-            }
-        }
-
-        InvSelection::ShieldSlot => {
-            let eq_opt = self.player.inventory.shield.take();
-            if let Some(eq) = eq_opt {
-                self.player.inventory.backpack.push(eq.clone());
-                log_msg = Some(format!("Unequipped {}.", eq.name));
-            } else {
-                log_msg = Some("No shield equipped.".to_string());
-            }
-        }
-
-        InvSelection::Consumable(_) => {
-            let item_opt = self.player.inventory.take_selected_consumable();
-            if let Some(item) = item_opt {
-                use std::time::Duration;
-
-                // Heal immediately (can be negative for damage)
-                let before = self.player.hp;
-                self.player.hp = (self.player.hp + item.heal).min(self.player.max_hp);
-                let healed = self.player.hp - before;
-
-                // Temporary buffs (30 sec) for non-HP stats
-                if item.atk_bonus != 0 || item.def_bonus != 0 {
-                    self.player.add_temp_buff(
-                        item.atk_bonus,
-                        item.def_bonus,
-                        0,
-                        Duration::from_secs(30),
-                    );
-                }
-
-                // Build effects string for log
-                let fmt_signed = |v: i32| if v >= 0 { format!("+{}", v) } else { format!("{}", v) };
-
-                let mut effects: Vec<String> = vec![Self::fmt_hp_delta(healed)];
-                if item.atk_bonus != 0 {
-                    effects.push(format!("{} ATK/30sec", fmt_signed(item.atk_bonus)));
-                }
-                if item.def_bonus != 0 {
-                    effects.push(format!("{} DEF/30sec", fmt_signed(item.def_bonus)));
-                }
-
-                log_msg = Some(format!(
-                    "Used {} ({}).",
-                    item.name,
-                    effects.join(", ")
-                ));
-            } else {
-                log_msg = Some("No consumables to use.".to_string());
-            }
-        }
-
-        InvSelection::BackpackItem(i) => {
-            let eq_opt = {
-                let inv = &mut self.player.inventory;
-                if i >= inv.backpack.len() {
-                    None
+        match selection {
+            InvSelection::SwordSlot => {
+                let eq_opt = self.player.inventory.sword.take();
+                if let Some(eq) = eq_opt {
+                    self.player.inventory.backpack.push(eq.clone());
+                    log_msg = Some(format!("Unequipped {}.", eq.name));
                 } else {
-                    Some(inv.backpack.remove(i))
+                    log_msg = Some("No sword equipped.".to_string());
                 }
-            };
+            }
 
-            if let Some(eq) = eq_opt {
-                match eq.slot {
-                    Slot::Sword => {
-                        if let Some(old) = self.player.inventory.sword.take() {
-                            self.player.inventory.backpack.push(old);
-                        }
-                        self.player.inventory.sword = Some(eq.clone());
-                        log_msg = Some(format!("Equipped sword: {}.", eq.name));
-                    }
-                    Slot::Shield => {
-                        if let Some(old) = self.player.inventory.shield.take() {
-                            self.player.inventory.backpack.push(old);
-                        }
-                        self.player.inventory.shield = Some(eq.clone());
-                        log_msg = Some(format!("Equipped shield: {}.", eq.name));
-                    }
+            InvSelection::ShieldSlot => {
+                let eq_opt = self.player.inventory.shield.take();
+                if let Some(eq) = eq_opt {
+                    self.player.inventory.backpack.push(eq.clone());
+                    log_msg = Some(format!("Unequipped {}.", eq.name));
+                } else {
+                    log_msg = Some("No shield equipped.".to_string());
                 }
+            }
 
-                let inv = &mut self.player.inventory;
-                if inv.backpack.is_empty() {
-                    inv.backpack_cursor = 0;
-                } else if inv.backpack_cursor >= inv.backpack.len() {
-                    inv.backpack_cursor = inv.backpack.len() - 1;
+            InvSelection::Consumable(_) => {
+                let item_opt = self.player.inventory.take_selected_consumable();
+                if let Some(item) = item_opt {
+                    use std::time::Duration;
+
+                    // Heal immediately (can be negative for damage)
+                    let before = self.player.hp;
+                    self.player.hp = (self.player.hp + item.heal).min(self.player.max_hp);
+                    let healed = self.player.hp - before;
+
+                    // Temporary buffs (30 sec) for non-HP stats
+                    if item.atk_bonus != 0 || item.def_bonus != 0 {
+                        self.player.add_temp_buff(
+                            item.atk_bonus,
+                            item.def_bonus,
+                            0,
+                            Duration::from_secs(30),
+                        );
+                    }
+
+                    // Build effects string for log
+                    let fmt_signed = |v: i32| if v >= 0 { format!("+{}", v) } else { format!("{}", v) };
+
+                    let mut effects: Vec<String> = vec![Self::fmt_hp_delta(healed)];
+                    if item.atk_bonus != 0 {
+                        effects.push(format!("{} ATK/30sec", fmt_signed(item.atk_bonus)));
+                    }
+                    if item.def_bonus != 0 {
+                        effects.push(format!("{} DEF/30sec", fmt_signed(item.def_bonus)));
+                    }
+
+                    log_msg = Some(format!(
+                        "Used {} ({}).",
+                        item.name,
+                        effects.join(", ")
+                    ));
+                } else {
+                    log_msg = Some("No consumables to use.".to_string());
                 }
-            } else {
-                log_msg = Some("Nothing to equip.".to_string());
+            }
+
+            InvSelection::BackpackItem(i) => {
+                let eq_opt = {
+                    let inv = &mut self.player.inventory;
+                    if i >= inv.backpack.len() {
+                        None
+                    } else {
+                        Some(inv.backpack.remove(i))
+                    }
+                };
+
+                if let Some(eq) = eq_opt {
+                    match eq.slot {
+                        Slot::Sword => {
+                            if let Some(old) = self.player.inventory.sword.take() {
+                                self.player.inventory.backpack.push(old);
+                            }
+                            self.player.inventory.sword = Some(eq.clone());
+                            log_msg = Some(format!("Equipped sword: {}.", eq.name));
+                        }
+                        Slot::Shield => {
+                            if let Some(old) = self.player.inventory.shield.take() {
+                                self.player.inventory.backpack.push(old);
+                            }
+                            self.player.inventory.shield = Some(eq.clone());
+                            log_msg = Some(format!("Equipped shield: {}.", eq.name));
+                        }
+                    }
+
+                    let inv = &mut self.player.inventory;
+                    if inv.backpack.is_empty() {
+                        inv.backpack_cursor = 0;
+                    } else if inv.backpack_cursor >= inv.backpack.len() {
+                        inv.backpack_cursor = inv.backpack.len() - 1;
+                    }
+                } else {
+                    log_msg = Some("Nothing to equip.".to_string());
+                }
+            }
+
+            InvSelection::None => {
+                log_msg = Some("Nothing to use.".to_string());
             }
         }
 
-        InvSelection::None => {
-            log_msg = Some("Nothing to use.".to_string());
+        if let Some(m) = log_msg {
+            self.push_log(m);
         }
     }
-
-    if let Some(m) = log_msg {
-        self.push_log(m);
-    }
-}
 
 
     fn start_chest_dialogue(&mut self, room: usize, x: i32, y: i32, item: Option<Consumable>) {
@@ -913,6 +930,24 @@ fn use_or_unequip_or_equip(&mut self) {
         }
     }
 
+    // Helper to check neighbors for a door
+    fn door_near_player(&self) -> Option<(i32, i32)> {
+        let px = self.player.x;
+        let py = self.player.y;
+        let map = self.current_map();
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                if dx == 0 && dy == 0 { continue; }
+                let nx = px + dx;
+                let ny = py + dy;
+                if map.in_bounds(nx, ny) && map.get(nx as usize, ny as usize) == Tile::Door {
+                    return Some((nx, ny));
+                }
+            }
+        }
+        None
+    }
+
     pub fn apply_action(&mut self, action: Action) -> bool {
         self.player.purge_expired_buffs();
         match self.state {
@@ -993,9 +1028,19 @@ fn use_or_unequip_or_equip(&mut self) {
                             }
                         }
                     } else {
-                        self.open_chest_if_on_one();
-                        if self.state != GameState::Dialogue {
-                            self.push_log("No one nearby to talk to.".to_string());
+                        // CHECK FOR DOOR INTERACTION (NEARBY)
+                        if let Some(_door_pos) = self.door_near_player() {
+                             if self.player.inventory.sword.is_some() && self.player.inventory.shield.is_some() {
+                                 self.toggle_room();
+                             } else {
+                                 self.push_log("Talk to the mayor and come back");
+                             }
+                        } else {
+                             // CHECK CHESTS (STANDING ON THEM)
+                             self.open_chest_if_on_one();
+                             if self.state != GameState::Dialogue {
+                                 self.push_log("No one nearby to talk to.".to_string());
+                             }
                         }
                     }
                 }
@@ -1021,9 +1066,7 @@ fn use_or_unequip_or_equip(&mut self) {
                     }
 
                     let tile = self.current_map().get(newp.0 as usize, newp.1 as usize);
-                    if tile == Tile::Door {
-                        self.toggle_room();
-                    } else if tile == Tile::Chest {
+                    if tile == Tile::Chest {
                         self.open_chest_if_on_one();
                     }
                 }
