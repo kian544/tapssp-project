@@ -33,6 +33,7 @@ pub enum GameState {
     Playing,
     Dialogue,
     Battle,
+    Fin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +41,6 @@ pub enum NpcId {
     MayorSol,
     Noor,
     Lamp,
-    Dorosht, // NEW: Side quest NPC
     Random1,
     Random2,
     Random3,
@@ -51,6 +51,7 @@ pub enum NpcId {
     Shab,
     Krad,
     Mah,
+    Dorosht,
 }
 
 #[derive(Debug, Clone)]
@@ -66,7 +67,7 @@ pub struct Npc {
 #[derive(Debug, Clone)]
 pub enum AwaitingChoice {
     YesNoMayor,
-    YesNoDorosht, // NEW: Dorosht choice
+    YesNoDorosht,
     ABNoorWeapon,
     Chest {
         room: usize,
@@ -120,13 +121,13 @@ pub struct World {
     noor_done: bool,
     lamp_done: bool,
     
-    // Dorosht Quest Flags
     dorosht_accepted: bool,
     dorosht_completed: bool,
     
     shab_defeated: bool,
     krad_defeated: bool,
     mah_defeated: bool,
+    mayor_defeated: bool,
 
     pub dialogue: Option<DialogueSession>,
     pub battle: Option<BattleSession>,
@@ -179,6 +180,7 @@ impl World {
             shab_defeated: false,
             krad_defeated: false,
             mah_defeated: false,
+            mayor_defeated: false,
 
             dialogue: None,
             battle: None,
@@ -212,7 +214,9 @@ impl World {
             return self.random_floor_excluding(room, taken);
         }
 
-        let mut rng = StdRng::seed_from_u64(self.seed ^ 0xBEEFu64 ^ (taken.len() as u64 * 31));
+        let mut rng = StdRng::seed_from_u64(
+            self.seed ^ 0xBEEFu64 ^ (taken.len() as u64 * 31)
+        );
         floors[rng.gen_range(0..floors.len())]
     }
 
@@ -220,23 +224,35 @@ impl World {
         // --- ROOM 1 ---
         let mut mx = spawn0.0 + 5;
         let mut my = spawn0.1;
+
         if !self.is_floor(0, mx, my) {
             let candidates = [(mx, my), (mx, my + 1), (mx, my - 1), (mx + 1, my), (mx - 1, my)];
             for (cx, cy) in candidates {
-                if self.is_floor(0, cx, cy) { mx = cx; my = cy; break; }
+                if self.is_floor(0, cx, cy) {
+                    mx = cx;
+                    my = cy;
+                    break;
+                }
             }
         }
-        self.npcs.push(Npc { id: NpcId::MayorSol, name: "Mayor Sol".to_string(), room: 0, x: mx, y: my, symbol: 'M' });
 
-        let mut taken_r0: Vec<(i32, i32)> = vec![(spawn0.0, spawn0.1), (mx, my), self.levels[0].door];
+        self.npcs.push(Npc {
+            id: NpcId::MayorSol,
+            name: "Mayor Sol".to_string(),
+            room: 0,
+            x: mx,
+            y: my,
+            symbol: 'M',
+        });
+
+        let mut taken_r0: Vec<(i32, i32)> = vec![
+            (spawn0.0, spawn0.1),
+            (mx, my),
+            self.levels[0].door,
+        ];
         for ch in &self.levels[0].chests { taken_r0.push((ch.x, ch.y)); }
 
-        // Noor, Lamp, Dorosht
-        for (id, sym, name) in [
-            (NpcId::Noor, 'N', "Noor"),
-            (NpcId::Lamp, 'L', "Lamp"),
-            (NpcId::Dorosht, 'D', "Dorosht"),
-        ] {
+        for (id, sym, name) in [(NpcId::Noor, 'N', "Noor"), (NpcId::Lamp, 'L', "Lamp"), (NpcId::Dorosht, 'D', "Dorosht")] {
             let (x, y) = self.random_floor_spaced(0, &taken_r0, Self::NPC_MIN_SEP);
             taken_r0.push((x, y));
             self.npcs.push(Npc { id, name: name.to_string(), room: 0, x, y, symbol: sym });
@@ -312,8 +328,8 @@ impl World {
         let spawn = (sx as i32, sy as i32);
         let door = Self::place_random_door(&mut map, seed ^ 0xD00D, spawn);
         
-        // Random chests
-        let chests = Self::scatter_chests(&mut map, seed ^ 0xC1E57, spawn, door);
+        let count = if depth == 0 { 3 } else { 4 };
+        let chests = Self::scatter_chests(&mut map, seed ^ 0xC1E57, spawn, door, count);
         
         (Level { map, door, chests }, spawn)
     }
@@ -346,7 +362,7 @@ impl World {
         }
     }
 
-    fn scatter_chests(map: &mut Map, seed: u64, spawn: (i32, i32), door: (i32, i32)) -> Vec<Chest> {
+    fn scatter_chests(map: &mut Map, seed: u64, spawn: (i32, i32), door: (i32, i32), target_count: usize) -> Vec<Chest> {
         let mut floors = Vec::new();
         for y in 0..map.height {
             for x in 0..map.width {
@@ -356,7 +372,7 @@ impl World {
         let mut rng = StdRng::seed_from_u64(seed);
         let mut chests = Vec::new();
         let mut exclude = vec![spawn, door];
-        let count = 3usize.min(floors.len());
+        let count = target_count.min(floors.len());
         for _ in 0..count {
             let mut pos = spawn;
             for _tries in 0..200 {
@@ -523,6 +539,8 @@ impl World {
             NpcId::Shab => ("Shab", 10, 3, 0, 4),
             NpcId::Krad => ("Krad", 20, 6, 4, 0),
             NpcId::Mah => ("Mah", 30, 12, 10, 8),
+            // Final Boss
+            NpcId::MayorSol => ("Mayor Sol", 40, 10, 30, 0),
             _ => return,
         };
 
@@ -630,6 +648,13 @@ impl World {
     }
 
     fn handle_win(&mut self, id: NpcId) {
+        // NEW LOGIC: Restore HP and boost Stats after any battle win
+        self.player.hp = self.player.max_hp;
+        self.player.base_attack += 3;
+        self.player.base_defense += 3;
+        self.player.base_speed += 3;
+        self.push_log("HP restored & Stats increased (+3)!");
+
         match id {
             NpcId::Shab => {
                 self.shab_defeated = true;
@@ -681,6 +706,10 @@ impl World {
                     "Listen, Sol, is not…".to_string(), "what".to_string(), "you".to_string(), "thin-".to_string()
                 ]);
             }
+            NpcId::MayorSol => {
+                self.mayor_defeated = true;
+                self.start_dialogue_raw("Mayor Sol", vec!["NOOOOOO, THE SHAREHOLDERSSSSSSSS".to_string()]);
+            }
             _ => {}
         }
         self.push_log("You won the battle!");
@@ -709,9 +738,8 @@ impl World {
         }
         
         if found {
-            // Unequip dagger first
             self.player.inventory.sword = None;
-            self.player.max_hp += 100; // Remove dagger penalty
+            self.player.max_hp += 100; 
         } else {
             for (i, item) in self.player.inventory.backpack.iter().enumerate() {
                 if item.name == "Weeping Dagger" {
@@ -729,7 +757,6 @@ impl World {
                     self.player.inventory.backpack.remove(i);
                 }
             }
-            
             let axe = Equipment {
                 name: "Willow Axe".to_string(),
                 slot: Slot::Sword,
@@ -745,17 +772,48 @@ impl World {
         let session = match npc.id {
             // Existing NPCs
             NpcId::MayorSol => {
-                 if self.mayor_done { DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Well, what’re you still standing here for? GO TO NOOR!".to_string()], page_index: 0, awaiting: None } } 
-                 else { DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Welcome to Sunny Days, visitor! I am Mayor Sol. We are normally much more able to take in tourists, but you may have arrived at a bad time. The Weeping have made it a rough time, they have completely taken over the Weeping Willow forests.".to_string(), "What’s that? The weeping sound like they belong in the Weeping Willow Forests? No! That’s nonsense, the only reason they are called the weeping, is because they WEEP before they kill! I mean, is it not right there in the name? Keep up! Ok, but my friend, you MUST help us get them out. Without our Weeping Willow bark, we are losing our health! Please will you help? (Y/N)".to_string()], page_index: 0, awaiting: Some(AwaitingChoice::YesNoMayor) } }
+                 if self.mayor_defeated {
+                     DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["...".to_string()], page_index: 0, awaiting: None }
+                 } else if self.dorosht_completed && self.mah_defeated {
+                     DialogueSession { 
+                         npc: npc.id, 
+                         title: npc.name.clone(), 
+                         pages: vec![
+                             "GREEEAAAAT JOB!!!!!!".to_string(),
+                             "YOU DID IT!!!!".to_string(),
+                             "but".to_string(),
+                             "It was for me...".to_string(),
+                             "You see, I LIED. To you, to this town, TO EVERYONE!".to_string(),
+                             "I told them, this sunshine drought was due to the Weeping, I even told them lies of their namesake, but it was for a good reason you see...".to_string(),
+                             "FOR MONEY! MUAHAHAHA".to_string(),
+                             "CAPATALISM SHALL PREVAIL!!!!".to_string()
+                         ], 
+                         page_index: 0, 
+                         awaiting: None 
+                     }
+                 } else if self.mayor_done { 
+                     DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Well, what’re you still standing here for? GO TO NOOR!".to_string()], page_index: 0, awaiting: None } 
+                 } else { 
+                     DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Welcome to Sunny Days, visitor! I am Mayor Sol. We are normally much more able to take in tourists, but you may have arrived at a bad time. The Weeping have made it a rough time, they have completely taken over the Weeping Willow forests.".to_string(), "What’s that? The weeping sound like they belong in the Weeping Willow Forests? No! That’s nonsense, the only reason they are called the weeping, is because they WEEP before they kill! I mean, is it not right there in the name? Keep up! Ok, but my friend, you MUST help us get them out. Without our Weeping Willow bark, we are losing our health! Please will you help? (Y/N)".to_string()], page_index: 0, awaiting: Some(AwaitingChoice::YesNoMayor) } 
+                 }
             },
             NpcId::Noor => {
-                 if self.noor_done { DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Scram! Go to Lamp and get whatever you’re missing!!".to_string()], page_index: 0, awaiting: None } }
-                 else { DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Hey there partner!".to_string(), "What’s that, the Mayor sent you here? Damn Sol, always ruining my day. What! No not you, you seem okay… ish. So you’re gonna go and fight the Weeping ay? Well you’ll need a weapon. Grab one: (A) Basic Sword  (B) Basic Shield".to_string(), "Good choice! Now I’ll keep the other one to be fair, if you want your second choice, go see Lamp!".to_string()], page_index: 0, awaiting: Some(AwaitingChoice::ABNoorWeapon) } }
+                 if self.dorosht_completed && self.mah_defeated {
+                     DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Always knew that SOB was no good, its up to you....".to_string()], page_index: 0, awaiting: None }
+                 } else if self.noor_done { 
+                     DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Scram! Go to Lamp and get whatever you’re missing!!".to_string()], page_index: 0, awaiting: None } 
+                 } else { 
+                     DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Hey there partner!".to_string(), "What’s that, the Mayor sent you here? Damn Sol, always ruining my day. What! No not you, you seem okay… ish. So you’re gonna go and fight the Weeping ay? Well you’ll need a weapon. Grab one: (A) Basic Sword  (B) Basic Shield".to_string(), "Good choice! Now I’ll keep the other one to be fair, if you want your second choice, go see Lamp!".to_string()], page_index: 0, awaiting: Some(AwaitingChoice::ABNoorWeapon) } 
+                 }
             },
             NpcId::Lamp => {
-                 if !self.noor_done { DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Hey aren’t you supposed to talk to Noor first?".to_string()], page_index: 0, awaiting: None } }
-                 else if self.lamp_done { DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Well good luck, if you’re fighting the Weeping, you’ll need it!".to_string()], page_index: 0, awaiting: None } }
-                 else {
+                 if self.dorosht_completed && self.mah_defeated {
+                     DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["I-I can't believe it....".to_string()], page_index: 0, awaiting: None }
+                 } else if !self.noor_done { 
+                     DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Hey aren’t you supposed to talk to Noor first?".to_string()], page_index: 0, awaiting: None } 
+                 } else if self.lamp_done { 
+                     DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Well good luck, if you’re fighting the Weeping, you’ll need it!".to_string()], page_index: 0, awaiting: None } 
+                 } else {
                     let missing = if self.player.inventory.sword.is_none() { "Sword" } else { "Shield" };
                     DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec![format!("Hey! Did Noor send you? Yeah, they’re a bit rough around the edges. So you’re missing a {}, well take this!", missing), format!("You got the {}.", missing)], page_index: 0, awaiting: None }
                  }
@@ -764,7 +822,6 @@ impl World {
                 if self.dorosht_completed {
                     DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Thanks again!".to_string()], page_index: 0, awaiting: None }
                 } else if self.dorosht_accepted {
-                    // Try to swap item
                     if self.swap_dorosht_item() {
                         self.dorosht_completed = true;
                         DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec![
@@ -774,14 +831,30 @@ impl World {
                         DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Come back with the dagger, and she’s yours!".to_string()], page_index: 0, awaiting: None }
                     }
                 } else {
-                    DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec![
-                        "Hey there mighty traveler, rumor is, you’re going to go into the Weeping Willow Woods… if you do, might you fetch me something?".to_string()
-                    ], page_index: 0, awaiting: Some(AwaitingChoice::YesNoDorosht) }
+                    DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Hey there mighty traveler, rumor is, you’re going to go into the Weeping Willow Woods… if you do, might you fetch me something? (Y/N)".to_string()], page_index: 0, awaiting: Some(AwaitingChoice::YesNoDorosht) }
                 }
             },
-            NpcId::Random1 => DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Isn’t it bad? So gloomy, so dark, I need some vitamin D pills or something!".to_string()], page_index: 0, awaiting: None },
-            NpcId::Random2 => DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["I actually overheard the Mayor talking to himself, I think he’s going a bit cukoo!!".to_string()], page_index: 0, awaiting: None },
-            NpcId::Random3 => DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Oh please, if you think the Weeping are bad, wait until you hear from the IRS!".to_string()], page_index: 0, awaiting: None },
+            NpcId::Random1 => {
+                if self.dorosht_completed && self.mah_defeated {
+                    DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["The sunshine, but at what cost...".to_string()], page_index: 0, awaiting: None }
+                } else {
+                    DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Isn’t it bad? So gloomy, so dark, I need some vitamin D pills or something!".to_string()], page_index: 0, awaiting: None }
+                }
+            },
+            NpcId::Random2 => {
+                if self.dorosht_completed && self.mah_defeated {
+                    DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["I KNEW IT!".to_string()], page_index: 0, awaiting: None }
+                } else {
+                    DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["I actually overheard the Mayor talking to himself, I think he’s going a bit cukoo!!".to_string()], page_index: 0, awaiting: None }
+                }
+            },
+            NpcId::Random3 => {
+                if self.dorosht_completed && self.mah_defeated {
+                    DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["I'd rather pay taxes than go through what they have, for the sake they have...".to_string()], page_index: 0, awaiting: None }
+                } else {
+                    DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["Oh please, if you think the Weeping are bad, wait until you hear from the IRS!".to_string()], page_index: 0, awaiting: None }
+                }
+            },
             
             NpcId::Weeping1 => DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["I can’t believe that’s how they think of us in here, we literally get our name from the Weeping Willow trees that we LIVE in. Like come on!".to_string()], page_index: 0, awaiting: None },
             NpcId::Weeping2 => DialogueSession { npc: npc.id, title: npc.name.clone(), pages: vec!["It sure is cold out, all that global warming bibble babble is a hoax!".to_string()], page_index: 0, awaiting: None },
@@ -824,6 +897,12 @@ impl World {
                     NpcId::Shab if !self.shab_defeated => start_battle_id = Some(NpcId::Shab),
                     NpcId::Krad if !self.krad_defeated => start_battle_id = Some(NpcId::Krad),
                     NpcId::Mah if !self.mah_defeated && self.shab_defeated && self.krad_defeated => start_battle_id = Some(NpcId::Mah),
+                    NpcId::MayorSol if !self.mayor_defeated && self.dorosht_completed && self.mah_defeated => start_battle_id = Some(NpcId::MayorSol),
+                    NpcId::MayorSol if self.mayor_defeated => {
+                        self.state = GameState::Fin;
+                        self.dialogue = None;
+                        return;
+                    }
                     _ => {}
                 }
                 self.dialogue = None;
@@ -936,6 +1015,7 @@ impl World {
             GameState::Title => match action { Action::Confirm => self.state = GameState::Intro, Action::Quit => return false, _ => {} },
             GameState::Intro => match action { Action::Confirm => self.state = GameState::Playing, Action::Quit => return false, _ => {} },
             GameState::Dialogue => match action { Action::Confirm => self.dialogue_continue(), Action::Choice(c) => self.dialogue_choice(c), Action::Quit => return false, _ => {} },
+            GameState::Fin => match action { Action::Quit => return false, _ => {} },
             
             GameState::Battle => match action {
                 Action::BattleOption(opt, penalty) => {

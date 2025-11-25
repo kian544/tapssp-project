@@ -80,16 +80,19 @@ pub fn run() -> std::io::Result<()> {
 
                     let mut action = match world.state {
                         GameState::Title | GameState::Intro => match key.code {
-                            // Allow Space, Enter, e, or E to advance title/intro
                             KeyCode::Char(' ') | KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('E') => Action::Confirm,
                             _ => Action::None,
                         },
 
                         GameState::Dialogue => match key.code {
-                            // Allow Space, Enter, e, or E to advance dialogue pages
-                            // This is placed BEFORE the alphabetic check so 'e' acts as Confirm, not Choice('e')
                             KeyCode::Char(' ') | KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('E') => Action::Confirm,
                             KeyCode::Char(c) if c.is_ascii_alphabetic() => Action::Choice(c),
+                            _ => Action::None,
+                        },
+                        
+                        GameState::Fin => match key.code {
+                            // Wait for quit via Ctrl+C (handled above) or maybe 'q'
+                            KeyCode::Char('q') | KeyCode::Char('Q') => Action::Quit,
                             _ => Action::None,
                         },
 

@@ -55,6 +55,7 @@ pub fn render(f: &mut Frame, world: &World) {
         GameState::Intro => draw_intro_static(f, size, world),
         GameState::Playing | GameState::Dialogue => draw_playing(f, size, world),
         GameState::Battle => draw_battle(f, size, world),
+        GameState::Fin => draw_fin(f, size),
     }
 }
 
@@ -99,6 +100,34 @@ fn draw_intro_static(f: &mut Frame, area: Rect, world: &World) {
         .wrap(Wrap { trim: true });
 
     f.render_widget(intro, area);
+}
+
+fn draw_fin(f: &mut Frame, area: Rect) {
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "FIN",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "SUNNY DAY",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "BY KIAN KAKAVANDI",
+            Style::default().fg(Color::White).add_modifier(Modifier::ITALIC),
+        )),
+        Line::from(""),
+        Line::from("Press Ctrl+C to exit"),
+    ];
+
+    let fin = Paragraph::new(lines)
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL));
+
+    f.render_widget(fin, area);
 }
 
 fn draw_playing(f: &mut Frame, size: Rect, world: &World) {
