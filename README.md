@@ -1,7 +1,7 @@
 # tapssp-project
 
 My project is going to be tackling a terminal based rougelike videogame. 
-The main goal will be to have map generation, turned based combat/dialogue, and more, like using AI plugins for randomization.
+The main goal will be to have map generation, turned based combat/dialogue, and more.
 
 The core of the game will be based on things like trait based APIs, a lightweight architecture, and even benchmarks and logs for either optimization, or player data
 
