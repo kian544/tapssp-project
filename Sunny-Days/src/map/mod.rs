@@ -48,6 +48,7 @@ impl Map {
     }
 
     pub fn is_walkable(&self, x: usize, y: usize) -> bool {
-        matches!(self.get(x, y), Tile::Floor | Tile::Door | Tile::Chest)
+        // Door is no longer walkable; it acts like a character/NPC.
+        matches!(self.get(x, y), Tile::Floor | Tile::Chest)
     }
 }

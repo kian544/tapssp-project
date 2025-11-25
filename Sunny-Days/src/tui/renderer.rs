@@ -423,7 +423,7 @@ fn draw_sidebar(f: &mut Frame, area: Rect, world: &World) {
         text.push(Line::from("T: Inventory Tab"));
         text.push(Line::from("Q: Stats"));
         text.push(Line::from("Ctrl+C: Quit"));
-        text.push(Line::from("Step on + to switch rooms"));
+        text.push(Line::from("E on +: Switch rooms"));
     }
 
     let sidebar = Paragraph::new(text)
