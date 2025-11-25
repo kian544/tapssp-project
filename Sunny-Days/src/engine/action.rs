@@ -15,6 +15,9 @@ pub enum Action {
     Interact,
     Choice(char),
 
+    // NEW: Battle Option (1=Fight, 2=Inv, 3=Run). bool = 10s penalty active
+    BattleOption(u8, bool), 
+
     Quit, // Ctrl+C / Ctrl+Q
     None,
 }

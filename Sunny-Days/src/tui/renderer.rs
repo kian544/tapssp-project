@@ -54,6 +54,7 @@ pub fn render(f: &mut Frame, world: &World) {
         GameState::Title => draw_title(f, size),
         GameState::Intro => draw_intro_static(f, size, world),
         GameState::Playing | GameState::Dialogue => draw_playing(f, size, world),
+        GameState::Battle => draw_battle(f, size, world),
     }
 }
 
@@ -149,6 +150,78 @@ fn draw_playing(f: &mut Frame, size: Rect, world: &World) {
     }
 }
 
+fn draw_battle(f: &mut Frame, size: Rect, world: &World) {
+    let log_h = (size.height / 4).clamp(5, 10);
+
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(3),
+            Constraint::Length(log_h),
+        ])
+        .split(size);
+
+    let top = vertical[0];
+    let bottom = vertical[1];
+
+    let sidebar_w = (top.width / 3).clamp(20, 40);
+
+    if top.width < sidebar_w + 25 {
+        let stacked = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(3),
+                Constraint::Length(12),
+            ])
+            .split(top);
+
+        draw_map(f, stacked[0], world);
+        draw_sidebar(f, stacked[1], world);
+    } else {
+        let horizontal = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(10),
+                Constraint::Length(sidebar_w),
+            ])
+            .split(top);
+
+        draw_map(f, horizontal[0], world);
+        draw_sidebar(f, horizontal[1], world);
+    }
+
+    if let Some(bs) = &world.battle {
+        let mut lines = vec![
+            Line::from(Span::styled(
+                format!("BATTLE VS {}", bs.enemy_name),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(format!("Enemy HP: {}/{}", bs.enemy_hp, bs.enemy_max_hp)),
+            Line::from(""),
+        ];
+        
+        if world.inventory_open {
+             lines.push(Line::from("SELECT CONSUMABLE (Space) OR I to Cancel"));
+             for (i, c) in world.player.inventory.consumables.iter().enumerate() {
+                 let marker = if matches!(world.player.inventory.selection(), InvSelection::Consumable(idx) if idx == i) { ">" } else { " " };
+                 lines.push(Line::from(format!("{} {}", marker, c.name)));
+             }
+        } else {
+            lines.push(Line::from("1. Fight"));
+            lines.push(Line::from("2. Inventory"));
+            lines.push(Line::from("3. Run"));
+        }
+        
+        lines.push(Line::from("--- Log ---"));
+        for l in world.logs.iter().rev().take(3) {
+            lines.push(Line::from(l.clone()));
+        }
+
+        let block = Block::default().borders(Borders::ALL).title("Battle").style(Style::default().fg(Color::Red));
+        f.render_widget(Paragraph::new(lines).block(block).wrap(Wrap { trim: true }), bottom);
+    }
+}
+
 fn draw_map(f: &mut Frame, area: Rect, world: &World) {
     f.render_widget(Clear, area);
 
@@ -192,21 +265,23 @@ fn draw_map(f: &mut Frame, area: Rect, world: &World) {
             }
 
             if let Some(npc) = world.npc_at(world.current, wx, wy) {
-                let style = match npc.id {
-                    NpcId::MayorSol => Style::default().fg(Color::Cyan),
-                    NpcId::Noor => Style::default().fg(Color::Magenta),
-                    NpcId::Lamp => Style::default().fg(Color::Yellow),
+                let (style, bold) = match npc.id {
+                    NpcId::MayorSol => (Style::default().fg(Color::Cyan), true),
+                    NpcId::Noor => (Style::default().fg(Color::Magenta), true),
+                    NpcId::Lamp => (Style::default().fg(Color::Yellow), true),
                     NpcId::Random1 | NpcId::Random2 | NpcId::Random3 => {
-                        Style::default().fg(Color::Yellow)
+                        (Style::default().fg(Color::Yellow), true)
                     }
-                    // NEW: Room 2 NPCs are LightBlue
                     NpcId::Weeping1 | NpcId::Weeping2 | NpcId::Weeping3 | NpcId::Weeping4 => {
-                        Style::default().fg(Color::LightBlue)
+                        (Style::default().fg(Color::LightBlue), true)
+                    }
+                    NpcId::Shab | NpcId::Krad | NpcId::Mah => {
+                        (Style::default().fg(Color::Red), true)
                     }
                 };
                 spans.push(Span::styled(
                     npc.symbol.to_string(),
-                    style.add_modifier(Modifier::BOLD),
+                    if bold { style.add_modifier(Modifier::BOLD) } else { style },
                 ));
                 continue;
             }
@@ -232,7 +307,7 @@ fn draw_map(f: &mut Frame, area: Rect, world: &World) {
 
     let map_widget = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title("Map"))
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false }); // Map should NOT trim or wrap in a standard way to preserve grid
 
     f.render_widget(map_widget, area);
 }

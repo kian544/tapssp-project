@@ -39,9 +39,20 @@ pub fn run() -> std::io::Result<()> {
 
     let tick_rate = Duration::from_millis(60);
     let mut last_move_time = Instant::now() - Duration::from_millis(MOVE_COOLDOWN_MS);
+    
+    // Track last battle input for 10s penalty
+    let mut last_battle_input = Instant::now();
 
     let mut running = true;
     while running {
+        // Check Death
+        if world.player.hp <= 0 {
+            terminal.clear()?;
+            println!("You died. Press Ctrl+C to quit.");
+            // Break loop to exit properly
+            break;
+        }
+
         if let Err(_) = terminal.draw(|f| render(f, &world)) {
             terminal.autoresize()?;
             terminal.clear()?;
@@ -78,6 +89,34 @@ pub fn run() -> std::io::Result<()> {
                             KeyCode::Char(' ') | KeyCode::Enter => Action::Confirm,
                             KeyCode::Char(c) if c.is_ascii_alphabetic() => Action::Choice(c),
                             _ => Action::None,
+                        },
+
+                        GameState::Battle => {
+                            if world.inventory_open {
+                                match key.code {
+                                    KeyCode::Char('i') | KeyCode::Esc => Action::ToggleInventory,
+                                    KeyCode::Up => Action::InventoryUp,
+                                    KeyCode::Down => Action::InventoryDown,
+                                    KeyCode::Char(' ') => Action::UseConsumable,
+                                    _ => Action::None,
+                                }
+                            } else {
+                                let now = Instant::now();
+                                let elapsed = now.duration_since(last_battle_input);
+                                let penalty = elapsed.as_secs() >= 10;
+                                
+                                let act = match key.code {
+                                    KeyCode::Char('1') => Action::BattleOption(1, penalty),
+                                    KeyCode::Char('2') => Action::BattleOption(2, penalty),
+                                    KeyCode::Char('3') => Action::BattleOption(3, penalty),
+                                    _ => Action::None,
+                                };
+                                
+                                if !matches!(act, Action::None) {
+                                    last_battle_input = now;
+                                }
+                                act
+                            }
                         },
 
                         GameState::Playing => {
@@ -122,7 +161,12 @@ pub fn run() -> std::io::Result<()> {
                         }
                     }
 
+                    // If transitioning INTO Battle, reset timer
+                    let old_state = world.state.clone();
                     running = world.apply_action(action);
+                    if old_state != GameState::Battle && world.state == GameState::Battle {
+                        last_battle_input = Instant::now();
+                    }
                 }
 
                 _ => {}
@@ -139,5 +183,10 @@ pub fn run() -> std::io::Result<()> {
         DisableMouseCapture
     )?;
     terminal.show_cursor()?;
+    
+    if world.player.hp <= 0 {
+        println!("You died.");
+    }
+
     Ok(())
 }
