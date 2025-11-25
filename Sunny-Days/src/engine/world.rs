@@ -43,6 +43,11 @@ pub enum NpcId {
     Random1,
     Random2,
     Random3,
+    // NEW: Room 2 NPCs
+    Weeping1,
+    Weeping2,
+    Weeping3,
+    Weeping4,
 }
 
 #[derive(Debug, Clone)]
@@ -166,7 +171,7 @@ impl World {
     }
 
 
-    // ✅ NEW: only returns a floor tile that is >= min_dist away from all taken positions.
+    // Only returns a floor tile that is >= min_dist away from all taken positions.
     // Uses Chebyshev distance (max of dx/dy), which feels best on grid movement.
     fn random_floor_spaced(&self, room: usize, taken: &[(i32, i32)], min_dist: i32) -> (i32, i32) {
         let map = &self.levels[room].map;
@@ -198,6 +203,7 @@ impl World {
     }
 
     fn spawn_npcs(&mut self, spawn0: (i32, i32)) {
+        // --- ROOM 1 (Index 0) ---
         // Mayor Sol fixed 5 blocks from spawn
         let mut mx = spawn0.0 + 5;
         let mut my = spawn0.1;
@@ -228,21 +234,20 @@ impl World {
             symbol: 'M',
         });
 
-        // ✅ NEW: taken list for spacing
-        let mut taken: Vec<(i32, i32)> = vec![
+        // taken list for spacing in Room 1
+        let mut taken_r0: Vec<(i32, i32)> = vec![
             (spawn0.0, spawn0.1),
             (mx, my),
             self.levels[0].door,
         ];
 
-        // also keep NPCs away from chests so it doesn't look cluttered
         for ch in &self.levels[0].chests {
-            taken.push((ch.x, ch.y));
+            taken_r0.push((ch.x, ch.y));
         }
 
         // Noor spaced in Room 1
-        let (nx, ny) = self.random_floor_spaced(0, &taken, Self::NPC_MIN_SEP);
-        taken.push((nx, ny));
+        let (nx, ny) = self.random_floor_spaced(0, &taken_r0, Self::NPC_MIN_SEP);
+        taken_r0.push((nx, ny));
         self.npcs.push(Npc {
             id: NpcId::Noor,
             name: "Noor".to_string(),
@@ -253,8 +258,8 @@ impl World {
         });
 
         // Lamp spaced in Room 1
-        let (lx, ly) = self.random_floor_spaced(0, &taken, Self::NPC_MIN_SEP);
-        taken.push((lx, ly));
+        let (lx, ly) = self.random_floor_spaced(0, &taken_r0, Self::NPC_MIN_SEP);
+        taken_r0.push((lx, ly));
         self.npcs.push(Npc {
             id: NpcId::Lamp,
             name: "Lamp".to_string(),
@@ -264,16 +269,47 @@ impl World {
             symbol: 'L',
         });
 
-        // 3 random villagers (yellow circles), spaced placement Room 1
+        // 3 random villagers in Room 1
         for id in [NpcId::Random1, NpcId::Random2, NpcId::Random3] {
-            let (vx, vy) = self.random_floor_spaced(0, &taken, Self::NPC_MIN_SEP);
-            taken.push((vx, vy));
+            let (vx, vy) = self.random_floor_spaced(0, &taken_r0, Self::NPC_MIN_SEP);
+            taken_r0.push((vx, vy));
             self.npcs.push(Npc {
                 id,
                 name: "Villager".to_string(),
                 room: 0,
                 x: vx,
                 y: vy,
+                symbol: '●',
+            });
+        }
+
+        // --- ROOM 2 (Index 1) ---
+        // We need to track taken spots in Room 2. 
+        // We should include the door position and any chests in Room 2.
+        let mut taken_r1: Vec<(i32, i32)> = vec![
+            self.levels[1].door,
+        ];
+        for ch in &self.levels[1].chests {
+            taken_r1.push((ch.x, ch.y));
+        }
+
+        // Spawn 4 Random Weeping Villagers
+        let weeping_ids = [
+            NpcId::Weeping1,
+            NpcId::Weeping2,
+            NpcId::Weeping3,
+            NpcId::Weeping4,
+        ];
+
+        for id in weeping_ids {
+            let (wx, wy) = self.random_floor_spaced(1, &taken_r1, Self::NPC_MIN_SEP);
+            taken_r1.push((wx, wy));
+            self.npcs.push(Npc {
+                id,
+                name: "Weeping Villager".to_string(),
+                room: 1,
+                x: wx,
+                y: wy,
                 symbol: '●',
             });
         }
@@ -813,6 +849,49 @@ impl World {
                 title: npc.name.clone(),
                 pages: vec![
                     "Oh please, if you think the Weeping are bad, wait until you hear from the IRS!".to_string()
+                ],
+                page_index: 0,
+                awaiting: None,
+            },
+
+            // NEW: Dialogue for Room 2 NPCs
+            NpcId::Weeping1 => DialogueSession {
+                npc: npc.id,
+                title: npc.name.clone(),
+                pages: vec![
+                    "I can’t believe that’s how they think of us in here, we literally get our name from the Weeping Willow trees that we LIVE in. Like come on!".to_string()
+                ],
+                page_index: 0,
+                awaiting: None,
+            },
+
+            NpcId::Weeping2 => DialogueSession {
+                npc: npc.id,
+                title: npc.name.clone(),
+                pages: vec![
+                    "It sure is cold out, all that global warming bibble babble is a hoax!".to_string()
+                ],
+                page_index: 0,
+                awaiting: None,
+            },
+
+            NpcId::Weeping3 => DialogueSession {
+                npc: npc.id,
+                title: npc.name.clone(),
+                pages: vec![
+                    "Have you talked to the guy who thinks global warming is fake? What a nut!".to_string()
+                ],
+                page_index: 0,
+                awaiting: None,
+            },
+
+            NpcId::Weeping4 => DialogueSession {
+                npc: npc.id,
+                title: npc.name.clone(),
+                pages: vec![
+                    "I had a friend in that village…".to_string(),
+                    "His name meant bright, just like how he was.".to_string(),
+                    "I wonder how he’s doing…".to_string(),
                 ],
                 page_index: 0,
                 awaiting: None,

@@ -199,6 +199,10 @@ fn draw_map(f: &mut Frame, area: Rect, world: &World) {
                     NpcId::Random1 | NpcId::Random2 | NpcId::Random3 => {
                         Style::default().fg(Color::Yellow)
                     }
+                    // NEW: Room 2 NPCs are LightBlue
+                    NpcId::Weeping1 | NpcId::Weeping2 | NpcId::Weeping3 | NpcId::Weeping4 => {
+                        Style::default().fg(Color::LightBlue)
+                    }
                 };
                 spans.push(Span::styled(
                     npc.symbol.to_string(),
